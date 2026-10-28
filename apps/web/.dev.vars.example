@@ -1,0 +1,19 @@
+# Local Worker secrets for `wrangler dev` / `opennextjs-cloudflare preview`.
+# Copy to .dev.vars (git-ignored). Every key is optional: the database is not
+# here (the Worker reaches it through the HYPERDRIVE binding, wrangler.jsonc),
+# and neither is the model — Workers AI embeds and answers through the AI
+# binding.
+#
+# OpenAI for the ANSWERS only (embeddings stay on Workers AI: the column is
+# sized to its model, and the docs and a question must share one). Set, the
+# answer is upstream's OpenAI model, straight from OpenAI, and the question
+# goes through OpenAI's moderation endpoint first, as upstream did. In
+# stage/prod this is a Worker secret the owner sets once per environment:
+# `wrangler secret put OPENAI_API_KEY --name doc-search-web-<env>`
+# (README, "Use OpenAI for the answers").
+# OPENAI_API_KEY=
+# OPENAI_MODEL=gpt-3.5-turbo
+#
+# How similar a section must be to the question to reach the answer, as
+# cosine similarity (lib/search.ts, default 0.6).
+# MATCH_THRESHOLD=0.6
