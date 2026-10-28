@@ -1,0 +1,32 @@
+# Task contract template for the 01-product landing.
+# Unbound to a key on purpose: `orun.task/ensure@v1` seals and attaches it to
+# the key the allocator issues. It lives under `.baseline/`, not `tasks/`,
+# because `tasks/` is this repository's own work tree (`intent.yaml` `work:`),
+# where an unkeyed contract is an error. gates: [] is a DECLARATION — merge
+# alone finishes this task; the main convergence is the gate the bootstrap
+# watches, not one the plane observes as a PR check.
+#
+# The whole product in one landing. `affects` names COMPONENTS, by
+# metadata.name — every one the bootstrap's convergence plans on stage and
+# prod (the two test packages verify on dev, which the bootstrap keeps off
+# main until 02-docs, so a marker on them would re-plan nothing): the phase's
+# retouch hook reads this list to decide which component.yaml files get the
+# redeploy marker, so a re-run after a failed convergence has a diff and
+# re-plans exactly these — the deploy set and the task plane's statement of
+# the work are one list.
+apiVersion: orun.io/v1
+kind: TaskContract
+spec:
+  goal: The product's repository is born and linked, the whole product lands in one pull request, and one convergence provisions Supabase and Hyperdrive, migrates the schema and deploys the app on stage and prod
+  affects:
+    - supabase
+    - cloudflare-hyperdrive
+    - db
+    - db-migrate
+    - web
+  doneWhen:
+    - repo pushed, main pinned as default, workspace linked
+    - SUPABASE_PROJECT_REF, SUPABASE_DB_PASSWORD, SUPABASE_DB_URL and WIRING_CLOUDFLARE_HYPERDRIVE published on stage and prod
+    - migrations applied and the app deployed and smoke-tested on stage and prod, in the order supabase → cloudflare-hyperdrive → db-migrate → web
+    - the docs indexed by the deploy's smoke, and the page and /api/health answer on both workers.dev URLs
+  gates: []

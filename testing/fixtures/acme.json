@@ -1,0 +1,23 @@
+{
+  "_comment": [
+    "The inputs the placement, leak and e2e gates render with. Acme is not a",
+    "real product and never becomes one: this tree is placed into a temp",
+    "directory, asserted against, and deleted. The values are chosen to be",
+    "AWKWARD rather than tidy — a product name with an apostrophe and an",
+    "ampersand (both legal in the card's pattern, both special in TypeScript",
+    "strings, HTML and a PR title), a hyphenated repo slug that CONTAINS the",
+    "word `docs`, an owner other than the baseline's, and NO domain — a",
+    "console build asks for none, so the placeholder <reponame>.example.com",
+    "is what a product is born with — because a fixture that only uses values",
+    "the templates were written against proves the templates work on the",
+    "values they were written against.",
+    "Every key here is an input repo-blueprint.yaml declares. A key it does not",
+    "declare is a fixture that has drifted, and orun refuses it."
+  ],
+  "reponame": "acme-docs",
+  "productname": "Sam's Notes & Answers",
+  "githuborg": "acme-inc",
+  "subdomain": "acme",
+  "orunWorkspace": "ws_0000000000000000000000000000000f",
+  "epicSlug": "docs-baselining"
+}

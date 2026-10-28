@@ -10,7 +10,7 @@ product in one landing.**
 
 | | |
 |---|---|
-| Status | In progress — DQ1 on main: the site runs on Workers |
+| Status | ✅ Shipped (`baseline-v1`) — proven offline in Baseline CI; live bootstrap pending (risks DQ-A, DQ-B) |
 | Upstream | [supabase-community/nextjs-openai-doc-search](https://github.com/supabase-community/nextjs-openai-doc-search) (Apache-2.0), Vercel's [Next.js OpenAI Doc Search Starter](https://vercel.com/templates/next.js/nextjs-openai-doc-search-starter), at `50d6bb7` |
 | Reference | [rag-chatbot](https://github.com/sourceplane/rag-chatbot) — an AI SDK app on Workers AI and Supabase pgvector through Hyperdrive, the 768-dimension migration, db-migrate, the e2e's Workers AI stand-in |
 | Key | `DQ` |

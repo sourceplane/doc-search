@@ -1,0 +1,732 @@
+apiVersion: orun.dev/v1
+kind: Blueprint
+metadata:
+  name: doc-search
+  description: >-
+    The doc-search as a Blueprint of itself — instantiate a new doc search
+    repository (Supabase's Next.js OpenAI Doc Search Starter on Cloudflare
+    Workers + Static Assets, embedding and answering with Workers AI, its
+    pgvector index a Supabase project's Postgres behind Cloudflare
+    Hyperdrive, the schema applied by db-migrate, the docs indexed by every
+    deploy) and take it from nothing to live on stage and prod
+    in ONE landing, then record what went live. Run one phase at a
+    time with `--phase <name>` or both with `--resume`; see
+    docs/phases/README.md for the contract every phase follows, and
+    BOOTSTRAP.md for the operator checklist no script can perform.
+
+# ── INPUTS ────────────────────────────────────────────────────────────────
+# The instance-identity contract, consumed by tooling/rebrand/rebrand.mjs via
+# the `.rebrand/values.json` the `rebrand-values` module templates. Every
+# input a later phase needs is in that file, because it is committed and so
+# survives a fresh container; `.orun/provenance.lock` does not.
+#
+# The card (blueprint.yaml) declares a subset of these with the patterns the
+# console validates; testing/manifest.test.sh fails if a card input is not
+# one of these, or if one of these is required and nothing supplies it.
+inputs:
+  reponame:
+    type: string
+    pattern: "^[a-z][a-z0-9-]*$"
+    required: true
+    description: >-
+      Repo slug (e.g. acme-docs) — intent metadata.name, the Worker name
+      prefix, the secret project, and the `repo` the Supabase project and the
+      Hyperdrive config are named after.
+  productname:
+    type: string
+    required: true
+    description: The product's display name (e.g. "Acme Docs") — the page's title, in every tab and bookmark.
+  productdomain:
+    type: string
+    default: ""
+    description: >-
+      The product's own domain, once it has one (e.g. acme.dev). NOT ASKED:
+      the app answers on workers.dev from its first deploy, and a domain is an
+      owner's step after it. Empty, the rebrand writes the reserved
+      placeholder `<reponame>.example.com` where the domain goes (BASE_DOMAIN
+      in intent.yaml, for every environment), so setting it later is
+      replacing that one string — the product's README, "Custom domain", says
+      how. Pass it with --set only to brand a hand-run build with a domain it
+      already has.
+  githuborg:
+    type: string
+    pattern: "^[A-Za-z0-9][A-Za-z0-9-]*$"
+    required: true
+    description: >-
+      GitHub owner the product's repository is created under. 01-product waits
+      for the App installation on THIS owner before it creates anything: the
+      platform learns of a pull request only through the installation on the
+      account that owns the repository.
+  subdomain:
+    type: string
+    default: "your-workers-subdomain"
+    description: >-
+      The workers.dev subdomain of the Cloudflare account the app deploys
+      into — its URLs and the probes. A console or `--from bst_…` build gets
+      it from the workspace's Cloudflare connection (blueprint.yaml declares
+      `from: connection.cloudflare.workersSubdomain`); pass it with --set
+      only for a hand-run build.
+  repoPrivate:
+    type: boolean
+    default: true
+    description: >-
+      Whether the repository is created private. Private is the safe default;
+      `orun.repo/ensure@v1` only sets it at creation — an existing repository
+      keeps the visibility it has.
+  orunWorkspace:
+    type: string
+    default: ""
+    # Unset, it is the workspace the build runs in (ORUN_WORKSPACE — which a
+    # console build's sandbox always sets, and which the console form cannot
+    # send). A value set on the command line or recorded by the tree wins.
+    from: workspace
+    description: >-
+      Orun Cloud workspace (ws_…) for the product's remote state and secrets.
+      Unset, it is the workspace the build runs in; with none anywhere,
+      01-product writes a placeholder that fails loudly rather than silently
+      claiming another tenant's workspace.
+  epicSlug:
+    type: string
+    pattern: "^[a-z][a-z0-9-]*$"
+    default: docs-baselining
+    description: >-
+      The epic this bootstrap tracks itself under. Found by slug, so a run
+      that starts fresh and a run that resumes find the same work.
+
+# ── SOURCES ───────────────────────────────────────────────────────────────
+# The baseline is this repository itself. Run `orun new` from its root so
+# `path: .` resolves to it; orun pins it by digest into its object store
+# before any module reads it, so an instance is reproducible and provenanced.
+sources:
+  - name: baseline
+    kind: dir
+    path: .
+
+# Derived build output, local secrets and state, and the factory's own lanes
+# — never carried into an instance.
+#
+# WHAT `ignore` ACTUALLY EXCLUDES: orun matches an entry two ways, and which
+# one depends on the entry. A pattern with no glob metacharacter is compared
+# against each path SEGMENT; only a pattern containing one is compared against
+# the whole relative path. So `apps/web/.dev.vars` on its own would match
+# nothing — it needs the `**/`. testing/coverage.test.sh refuses an entry that
+# names a path without a glob.
+ignore:
+  - dist
+  - coverage
+  - .turbo
+  - .next
+  - .open-next
+  - .wrangler
+  - node_modules
+  - .orun
+  - .terraform
+  - plan.json
+  - "**/*.tsbuildinfo"
+  - "**/next-env.d.ts"
+  - "**/*.tfstate"
+  - "**/*.tfstate.backup"
+  # `orun new` snapshots the WORKING TREE, not the git index: an operator's
+  # local environment files would otherwise be copied into somebody else's
+  # repository. `.env.example` and `.dev.vars.example` are not among them,
+  # and ship — which is why this names `.dev.vars` and `.dev.vars.local`
+  # rather than `.dev.vars.*`.
+  - "**/.env"
+  - "**/.env.local"
+  - "**/.env.*.local"
+  - "**/.dev.vars"
+  - "**/.dev.vars.local"
+  # THE FACTORY'S OWN LANES. `github-workflows` copies the whole of `.github`,
+  # so without these two entries every product built from this baseline would
+  # carry them — `baseline.yml` runs `testing/*.sh`, which no module places,
+  # and `tag.yml` cuts baseline tags a product does not have.
+  # testing/coverage.test.sh fails if a lane reading `testing/` is not here.
+  - "**/.github/workflows/baseline.yml"
+  - "**/.github/workflows/tag.yml"
+
+# ── MODULES ───────────────────────────────────────────────────────────────
+# One module per component or root file. Root files are single-file modules
+# rather than one module with an include list: a file shipping to a product
+# is a line in a diff, and nothing of the factory (specs/, tasks/, testing/,
+# hooks/, docs/phases/, tooling/rebrand/, tooling/bootstrap/, the blueprints,
+# BOOTSTRAP.md, .baseline/) can ship by accident. testing/leak.test.sh holds
+# that line.
+#
+# Every module lands in ONE phase (01-product). `dependsOn` here orders the
+# placement only — what has to exist before what is written — and mirrors the
+# components' own graph; the DEPLOY order is the components' `dependsOn`,
+# which the product's own plan enforces on main.
+modules:
+  # ── the identity file every later phase reads back ───────────────────────
+  # The only place blueprint inputs touch the tree; everything else is a
+  # verbatim copy the `rebrand` hook rewrites. Committed, so a phase run months
+  # later from a fresh container recovers what the operator answered.
+  - name: rebrand-values
+    mode: template
+    files:
+      ".rebrand/values.json": |
+        {
+          "reponame": "{{ .reponame }}",
+          "productname": "{{ .productname }}",
+          "productdomain": "{{ .productdomain }}",
+          "subdomain": "{{ .subdomain }}",
+          "orunWorkspace": "{{ .orunWorkspace }}",
+          "githuborg": "{{ .githuborg }}",
+          "epicSlug": "{{ .epicSlug }}"
+        }
+
+  # ── root files ───────────────────────────────────────────────────────────
+  - name: root-intent
+    mode: copy
+    source: baseline
+    from: intent.yaml
+    to: intent.yaml
+  - name: root-package-json
+    mode: copy
+    source: baseline
+    from: package.json
+    to: package.json
+  - name: root-pnpm-workspace
+    mode: copy
+    source: baseline
+    from: pnpm-workspace.yaml
+    to: pnpm-workspace.yaml
+  # The baseline's complete lockfile, as it is: the whole tree lands at once
+  # and the lockfile carries no identity, so there is nothing to re-resolve —
+  # the lanes install it with --frozen-lockfile, and the baseline's own CI
+  # (testing/e2e.test.sh) does the same on this exact tree before a tag.
+  - name: root-pnpm-lock
+    mode: copy
+    source: baseline
+    from: pnpm-lock.yaml
+    to: pnpm-lock.yaml
+  - name: root-turbo
+    mode: copy
+    source: baseline
+    from: turbo.json
+    to: turbo.json
+  - name: root-gitignore
+    mode: copy
+    source: baseline
+    from: .gitignore
+    to: .gitignore
+  # The PRODUCT's README, not this repository's: this one is about the
+  # baseline (how to instantiate it, how it is tested), and a product's owner
+  # has no use for any of that.
+  - name: root-readme
+    mode: copy
+    source: baseline
+    from: .baseline/product/README.md
+    to: README.md
+  - name: github-workflows
+    mode: copy
+    source: baseline
+    from: .github
+    to: .github
+  - name: vscode
+    mode: copy
+    source: baseline
+    from: .vscode
+    to: .vscode
+
+  # The two context pages a product genuinely owns: its operating contract,
+  # and the deployment manifest 02-docs renders. One module per file, so a new
+  # file in ai/context/ cannot ship without somebody writing a module for it.
+  - name: ai-operations
+    mode: copy
+    source: baseline
+    from: ai/context/operations.md
+    to: ai/context/operations.md
+  - name: ai-deployment
+    mode: copy
+    source: baseline
+    from: ai/context/deployment.md
+    to: ai/context/deployment.md
+
+  # ── shared tooling ───────────────────────────────────────────────────────
+  # Only what a PRODUCT runs: the TypeScript and ESLint configuration, the
+  # deploy-time wrangler renderer, and the migration-manifest checker
+  # packages/db's scripts call. The factory's tooling (rebrand, bootstrap)
+  # stays here.
+  - name: tooling-tsconfig
+    mode: copy
+    source: baseline
+    from: tooling/tsconfig
+    to: tooling/tsconfig
+  - name: tooling-eslint
+    mode: copy
+    source: baseline
+    from: tooling/eslint
+    to: tooling/eslint
+  - name: tooling-wire
+    mode: copy
+    source: baseline
+    from: tooling/wire
+    to: tooling/wire
+  - name: tooling-migrations
+    mode: copy
+    source: baseline
+    from: tooling/migrations
+    to: tooling/migrations
+
+  # ── the data plane ───────────────────────────────────────────────────────
+  # The Lumen roots: a Supabase project per environment, a Hyperdrive config
+  # over its database, and the migrations, applied after the project exists.
+  - name: db
+    mode: copy
+    source: baseline
+    from: packages/db
+    to: packages/db
+    dependsOn: [tooling-eslint, tooling-migrations, tooling-tsconfig]
+  - name: supabase
+    mode: copy
+    source: baseline
+    from: infra/terraform/supabase
+    to: infra/terraform/supabase
+  - name: cloudflare-hyperdrive
+    mode: copy
+    source: baseline
+    from: infra/terraform/cloudflare-hyperdrive
+    to: infra/terraform/cloudflare-hyperdrive
+    dependsOn: [supabase]
+  - name: db-migrate
+    mode: copy
+    source: baseline
+    from: infra/db-migrate
+    to: infra/db-migrate
+    dependsOn: [cloudflare-hyperdrive, db, supabase]
+
+  # ── the app ──────────────────────────────────────────────────────────────
+  - name: web
+    mode: copy
+    source: baseline
+    from: apps/web
+    to: apps/web
+    dependsOn: [cloudflare-hyperdrive, db-migrate, tooling-eslint, tooling-tsconfig, tooling-wire]
+
+  # ── the tests ────────────────────────────────────────────────────────────
+  - name: db-tests
+    mode: copy
+    source: baseline
+    from: tests/db
+    to: tests/db
+    dependsOn: [db, tooling-eslint, tooling-tsconfig]
+  - name: web-tests
+    mode: copy
+    source: baseline
+    from: tests/web
+    to: tests/web
+    dependsOn: [tooling-eslint, tooling-tsconfig, tooling-wire, web]
+
+# ── THE WORK, UP FRONT ────────────────────────────────────────────────────
+# The bootstrap is work, so it lives where work lives — and all of it is on
+# the plane before the first phase places a file: one epic, one milestone per
+# phase in the order the phases run, one task per landing.
+#
+# `hooks.preInstantiate` (orun >= v2.60) runs under no phase, once per run, on
+# a resume too. Everything here is find-or-create BY IDENTITY — the epic by
+# slug, a milestone by name within its epic, a task by title within its epic —
+# so a second run, a resume and a redo all find what the first run made. The
+# milestones are created IN ORDER and BEFORE the tasks: the plane appends each
+# new milestone after the last, and a task naming a milestone the epic does
+# not have yet would create it out of order.
+#
+# IN THE BACKGROUND (orun >= v2.88.0, `background: true` on every hook here).
+# Nothing a phase does before its landing reads the task plane — the provider
+# check, the placement, the rebrand, the repository, the secrets — so the
+# whole list runs beside 01-product instead of before it, in order. A hook
+# that works on the plane (`orun.task/ensure@v1`, `orun.pr/land@v1`) waits
+# for it to finish; a failure here stops the build at the next hook.
+#
+# Each phase's own `task` hook runs `orun.task/ensure@v1` on its task again,
+# just before its landing. Same identity, so it finds rather than creates,
+# and it is how the phase gets the task's KEY for its landing; it sits in
+# `post` rather than `pre` so that everything before it overlaps with this
+# list.
+hooks:
+  preInstantiate:
+    - id: epic
+      uses: orun.task/ensure@v1
+      background: true
+      with:
+        kind: epic
+        slug: "{{ .inputs.epicSlug }}"
+        name: "Doc search baselining — {{ .inputs.productname }}"
+        description: >-
+          Everything the doc-search baseline builds for
+          {{ .inputs.productname }} in {{ .inputs.githuborg }}/{{ .inputs.reponame }}:
+          the repository and its CI, the Supabase project and the Hyperdrive
+          config per environment, the schema, the app live on stage and prod,
+          and the record of what went live. One milestone per phase, in the
+          order the phases run; one task per landing, each bound to the pull
+          request that lands it.
+        owner: me
+    - id: m01
+      uses: orun.task/ensure@v1
+      background: true
+      with:
+        kind: milestone
+        epic: "{{ .inputs.epicSlug }}"
+        name: 01-product
+        exitCriteria:
+          - repository created under {{ .inputs.githuborg }}, linked to the workspace, the whole product merged
+          - Supabase, Hyperdrive and the migrations applied, and the app deployed, on stage and prod — in that order
+          - the docs indexed by the deploy's smoke, and the page and /api/health answer on both workers.dev URLs
+    - id: m02
+      uses: orun.task/ensure@v1
+      background: true
+      with:
+        kind: milestone
+        epic: "{{ .inputs.epicSlug }}"
+        name: 02-docs
+        exitCriteria:
+          - ai/context/deployment.md on main matches the probed live URLs
+          - prod waits on stage again, and dev verifies every merge to main again
+    - id: t01
+      uses: orun.task/ensure@v1
+      background: true
+      with:
+        kind: task
+        epic: "{{ .inputs.epicSlug }}"
+        milestone: 01-product
+        name: "Build the product in one landing"
+        brief: >-
+          Create {{ .inputs.githuborg }}/{{ .inputs.reponame }} and land the
+          whole product as one pull request, branded as
+          {{ .inputs.productname }}: the intent, CI and tooling, the Supabase
+          and Hyperdrive Terraform roots, the migrations and the app. The
+          convergence that merge triggers provisions, migrates and deploys it,
+          in that order, on stage and prod.
+        prefix: BASE
+        contract: .baseline/tasks/01-product.TaskContract.yaml
+    - id: t02
+      uses: orun.task/ensure@v1
+      background: true
+      with:
+        kind: task
+        epic: "{{ .inputs.epicSlug }}"
+        milestone: 02-docs
+        name: "Record the live deployment"
+        brief: >-
+          Probe every live URL one last time and write the deployment record
+          into the repository from what actually answered — how much of the
+          docs is indexed and which model writes the answers included — not
+          from what the blueprint intended.
+        prefix: BASE
+        contract: .baseline/tasks/02-docs.TaskContract.yaml
+
+# ── PHASES ────────────────────────────────────────────────────────────────
+# A phase is orun's own barrier over the module DAG and the whole of what a
+# phase DOES: what it is for a person (`title`), what to budget
+# (`expectedMinutes`), what must already be true (`requires`), and the hooks
+# that do its work around placement — `pre` before, `post` after, `await` for
+# what is still converging when the hooks are done.
+#
+# THE ORDER HERE IS THE EXECUTION ORDER, and the numbered names are the names
+# the task plane's milestones carry.
+#
+# TWO PHASES, ONE LANDING THAT DEPLOYS. Everything the product is made of —
+# root files, workflows, tooling, the Terraform roots, the migrations, the app
+# and its tests — lands as ONE pull request, and ONE convergence on main
+# provisions and deploys it. The order the infrastructure needs is not a
+# sequence of landings: it is the components' own `dependsOn`, each edge
+# `mode: enforced` on a push to main — supabase → cloudflare-hyperdrive →
+# db-migrate → web, per environment. A job resolves its secrets when it
+# starts, so each one finds what the apply before it lease-published.
+# `02-docs` places nothing: it records the deployment and puts back what
+# 01-product deferred.
+phases:
+  - name: 01-product
+    title: The product, built in one landing
+    description: The whole tree — manifests, CI, tooling, the Supabase and Hyperdrive roots, the pgvector migrations, the app on Workers AI and its tests — branded, landed as one pull request, and provisioned and deployed by one convergence.
+    # An estimate, not a measurement: no bootstrap of this baseline has been
+    # timed. The convergence is most of it — a Supabase project takes five to
+    # seven minutes to come up, then Hyperdrive, the migrations and the app's
+    # build, deploy and smoke, stage and prod side by side. One minute less
+    # than before the v2.88.0 shape: on turso-starter's measured build that
+    # shape takes about a minute out of the same steps — the task set-up in
+    # the background, the landing checked in the box instead of by a runner,
+    # the watch reading every 5 s instead of 40.
+    expectedMinutes: 17
+    narrate:
+      start:  "Creating the repository and landing the whole product in one pull request — the doc search, its pgvector migrations, and the Terraform for a Supabase project and a Hyperdrive config per environment. Then one convergence provisions and deploys it in order. Usually about {{ .meta.expectedMinutes }} minutes."
+      await:  "One convergence is running per environment: the Supabase project first (five to seven minutes to come up), then Hyperdrive over its database, then the migrations, then the app. Nothing is stuck."
+      done:   "{{ .inputs.reponame }} is live on stage and prod — {{ .meta.files }} files on main, branded as {{ .inputs.productname }}, its docs indexed into pgvector through Hyperdrive and its models Workers AI's. OpenAI for the answers is optional, whenever you add its key. That took {{ .meta.elapsed }}."
+      failed: "The product did not come up. The failing lane above names the component — supabase, cloudflare-hyperdrive, db-migrate or web — and the provider's own error is in its log; whatever was provisioned is still there."
+    modules: [ai-deployment, ai-operations, cloudflare-hyperdrive, db, db-migrate, db-tests, github-workflows, rebrand-values, root-gitignore, root-intent, root-package-json, root-pnpm-lock, root-pnpm-workspace, root-readme, root-turbo, supabase, tooling-eslint, tooling-migrations, tooling-tsconfig, tooling-wire, vscode, web, web-tests]
+    # THE PLATFORM MUST BE ABLE TO SEE THE REPOSITORY BEFORE IT EXISTS. Every
+    # phase lands a pull request that files under its task, and the platform
+    # learns of a PR only through the GitHub App installation on the account
+    # that OWNS the repository. So the owner's connection is asked for here,
+    # before a repository is created, and waited for like any other consent —
+    # with the Cloudflare and Supabase connections every credential below is
+    # minted from, since this is the phase that provisions and deploys.
+    requires:
+      probe:
+        - id: providers
+          uses: orun.doctor/check@v1
+          with:
+            providers: [github, cloudflare, supabase]
+            githubOwner: "{{ .inputs.githuborg }}"
+            waitSeconds: 600
+            pollSeconds: 20
+    hooks:
+      post:
+        # A RE-RUN MUST HAVE SOMETHING TO LAND. A convergence can fail AFTER
+        # its PR merged, and the merge has already put every file on main;
+        # orun derives phase state from the tree, so a forced re-run lands an
+        # EMPTY diff while the product's CI plans `--changed`. retouch.mjs
+        # rewrites ONE trailing marker line — `# orun: redeploy <phase>
+        # <stamp>` — in each component.yaml the task contract names, so the
+        # landing has a diff and exactly those components re-plan. A deploy
+        # trigger, not state: nothing reads it back.
+        - id: retouch
+          run: ["node", "{{ .baseline.dir }}/tooling/bootstrap/retouch.mjs", "--phase", "{{ .phase.name }}", "--affects", "{{ .baseline.dir }}/.baseline/tasks/01-product.TaskContract.yaml"]
+        # The identity chain. rebrand.mjs enumerates the tree with
+        # `git ls-files`, so the output has to be a git repository with a
+        # populated index BEFORE it runs. `git add -A` only stages; the
+        # landing commits.
+        - id: git-init
+          run: ["git", "init", "-q"]
+        - id: stage
+          run: ["git", "add", "-A"]
+        - id: rebrand
+          run: ["node", "{{ .baseline.dir }}/tooling/rebrand/rebrand.mjs", "--values", ".rebrand/values.json", "--allow-dirty"]
+        # Re-tenant the product. rebrand.mjs treats the orun state backend as
+        # org-owned and leaves it alone, so intent.yaml would keep THIS
+        # repository's `workspace:` — the product's CI would then claim another
+        # tenant's workspace on every remote op. Hook argv is not templated,
+        # so the value travels through .rebrand/values.json, which IS.
+        - id: orun-workspace
+          run:
+            - node
+            - -e
+            - |
+              const fs = require("fs");
+              const values = JSON.parse(fs.readFileSync(".rebrand/values.json", "utf8"));
+              const ws = String(values.orunWorkspace || "").trim() || "ws_SET_ME";
+              const before = fs.readFileSync("intent.yaml", "utf8");
+              // Look for the line rather than for a change: a product built
+              // into a workspace already named there rewrites the line to the
+              // value it already has, and "unchanged" is not "missing".
+              const line = /^(\s*workspace:\s*).*$/m;
+              if (!line.test(before)) {
+                console.error("orun-workspace: no `workspace:` line in intent.yaml — refusing to guess");
+                process.exit(1);
+              }
+              fs.writeFileSync("intent.yaml", before.replace(line, "$1" + ws));
+              console.log(
+                ws === "ws_SET_ME"
+                  ? "orun-workspace: wrote placeholder ws_SET_ME — set your Orun Cloud workspace before enabling remote state"
+                  : "orun-workspace: intent.yaml workspace -> " + ws,
+              );
+        # The product carries no work tree of this repository's: `specs/` and
+        # `tasks/` never ship, so intent.yaml's `work:` block would point its
+        # every plan at two directories that do not exist.
+        - id: work-tree
+          run: ["node", "{{ .baseline.dir }}/tooling/bootstrap/work-tree.mjs", "--strip"]
+        # STAGE AND PROD DEPLOY SIDE BY SIDE UNTIL THE BOOTSTRAP IS DONE. The
+        # promotion gate makes prod wait out stage's whole chain (Supabase,
+        # Hyperdrive, migrations, the app); during a bootstrap both are empty
+        # and the convergence is watched to green, so it protects nothing and
+        # doubles the wall-clock. Deferred here, restored by 02-docs.
+        # tooling/bootstrap/promotion.mjs.
+        - id: promotion
+          run: ["node", "{{ .baseline.dir }}/tooling/bootstrap/promotion.mjs", "--defer"]
+        # DEV'S VERIFY LANES STAY OFF MAIN UNTIL THE BOOTSTRAP IS DONE, by the
+        # same mechanism: a third Next.js build and both test packages on the
+        # merge prove nothing the baseline's own CI did not. Pull requests keep
+        # their dev lanes. tooling/bootstrap/dev-lanes.mjs.
+        - id: dev-lanes
+          run: ["node", "{{ .baseline.dir }}/tooling/bootstrap/dev-lanes.mjs", "--defer"]
+        # Re-stage so `git ls-files` and `rebrand --verify` see the rewritten tree.
+        - id: restage
+          run: ["git", "add", "-A"]
+        - id: rebrand-verify
+          run: ["node", "{{ .baseline.dir }}/tooling/rebrand/rebrand.mjs", "--verify", "--values", ".rebrand/values.json"]
+        # The repo has to exist before there is anywhere to land.
+        - id: repo
+          uses: orun.repo/ensure@v1
+          narrate: "The repository exists at {{ .inputs.githuborg }}/{{ .inputs.reponame }}."
+          with:
+            owner: "{{ .inputs.githuborg }}"
+            name: "{{ .inputs.reponame }}"
+            private: "{{ .inputs.repoPrivate }}"
+        # THE REPOSITORY MUST BE THE WORKSPACE'S before anything lands in it,
+        # or the product's own CI cannot reach the platform: every convergence
+        # lane authenticates over GitHub OIDC, resolved through the repo link.
+        # `link` may be refused where the credential cannot write links (a
+        # workspace key) and the platform has linked the repository already,
+        # so it is best effort and `check` is the gate — an unlinked
+        # repository stops here, naming the fix, instead of in every lane.
+        - id: link
+          run:
+            - bash
+            - -c
+            - |
+              orun cloud link --org "$1" || true
+              orun cloud check --org "$1" || {
+                echo "$2 is not linked to workspace $1 — its CI cannot authenticate. Link it (orun cloud link --org $1, or the console's Git Repos) and re-run this phase." >&2
+                exit 1
+              }
+            - link
+            - "{{ .inputs.orunWorkspace }}"
+            - "{{ .inputs.githuborg }}/{{ .inputs.reponame }}"
+        # The provider credentials, brokered, in ONE hook PER PROVIDER (orun
+        # >= v2.87.0): `secrets` mints each key under its own scope template
+        # from the one connection of that provider the build is bound to,
+        # reading the connections and the existing secrets once and creating
+        # the missing keys side by side. Two hooks, because a reconcile reads
+        # one connection: Cloudflare's three keys, then Supabase's two. Five
+        # keys are still five scopes on purpose — the deploy token
+        # deliberately cannot touch Hyperdrive. Keys that already exist are
+        # kept. After the link, before the landing whose convergence uses them:
+        #   CLOUDFLARE_API_TOKEN         web's deploy (the composition's binding)
+        #   CLOUDFLARE_HYPERDRIVE_TOKEN  cloudflare-hyperdrive's provider
+        #   CLOUDFLARE_ACCOUNT_ID        web's deploy, cloudflare-hyperdrive
+        #   SUPABASE_ACCESS_TOKEN        supabase's provider, db-migrate's runner
+        #   SUPABASE_ORG_ID              supabase (TF_VAR_supabaseOrgId)
+        # No AI vendor key is minted: no connection brokers one, and none is
+        # needed — the embeddings and the answers are Workers AI's, through
+        # the Worker's AI binding, in the account CLOUDFLARE_API_TOKEN deploys
+        # into. OpenAI for the answers is the owner's to add later (the
+        # product's README, "Use OpenAI for the answers").
+        - id: secrets-cloudflare
+          uses: orun.integrations/reconcile@v1
+          with:
+            provider: cloudflare
+            secrets:
+              - { key: CLOUDFLARE_API_TOKEN, template: workers-deploy }
+              - { key: CLOUDFLARE_HYPERDRIVE_TOKEN, template: hyperdrive-edit }
+              - { key: CLOUDFLARE_ACCOUNT_ID, template: account-id }
+        - id: secrets-supabase
+          uses: orun.integrations/reconcile@v1
+          with:
+            provider: supabase
+            secrets:
+              - { key: SUPABASE_ACCESS_TOKEN, template: management-access }
+              - { key: SUPABASE_ORG_ID, template: org-id }
+        # The task this landing closes, and its key. The run-level list above
+        # opens it in the background; this is the first hook that needs it,
+        # so it is the one that waits for that list (orun >= v2.88.0) — every
+        # hook before it ran while the task plane was still being set up.
+        - id: task
+          uses: orun.task/ensure@v1
+          with:
+            kind: task
+            epic: "{{ .inputs.epicSlug }}"
+            milestone: "{{ .phase.name }}"
+            name: "Build the product in one landing"
+            prefix: BASE
+            contract: .baseline/tasks/01-product.TaskContract.yaml
+        # THE PRODUCT IS A PULL REQUEST THAT IS CHECKED, THEN MERGED — checked
+        # HERE (`checks: local`, orun >= v2.88.0): `orun validate`, then
+        # `orun plan` as the pull request and as the merge to main plan it,
+        # on the commit, before it is pushed. That is what the PR's `plan`
+        # job checks (the intent, every component and every composition
+        # resolve), plus the merge's own plan, in under a second instead of a
+        # runner's ~25 s. A tree that fails is never pushed. The PR's CI still
+        # runs (`plan` alone on a bootstrap branch, `orun/BASE-…`, ci.yml);
+        # nothing waits for it. The merge runs every lane on main a minute
+        # later, for real, and the convergence after it is what this phase
+        # watches to green.
+        - id: land
+          uses: orun.pr/land@v1
+          narrate: "The product is merged into main."
+          with:
+            task: "{{ .phase.hooks.task.outputs.key }}"
+            epic: "{{ .inputs.epicSlug }}"
+            branchSlug: "{{ .phase.name }}"
+            title: "feat: {{ .inputs.productname }}, the whole product from the doc-search baseline"
+            checks: local
+      await:
+        - id: converge
+          uses: orun.run/watch@v1
+          narrate: "Supabase, Hyperdrive, the migrations and the app went out on stage and prod, in that order, and the convergence run came back green."
+          with:
+            # The run for the commit THIS landing merged (an unpinned watch
+            # reads the previous push's run). The budget is roughly three
+            # times expectedMinutes: a Supabase project can take ten minutes
+            # on a busy region, and there is room for one resume.
+            sha: "{{ .phase.hooks.land.outputs.mergeSha }}"
+            repo: "{{ .inputs.githuborg }}/{{ .inputs.reponame }}"
+            resumeBudget: 3
+            waitSeconds: 3600
+            # Read every 5 s, not the action's 40: the build goes on the
+            # moment the run is green instead of up to 40 s after it.
+            pollSeconds: 5
+        # NO SEPARATE CHECK OF WHAT THE APPLIES PUBLISH. Each apply
+        # lease-publishes its outputs to the project's stage and prod rungs,
+        # and every one of the four is resolved IN THIS CONVERGENCE, from the
+        # place every later run looks (the readers' component.yaml
+        # `secretEnv`, fail-closed when a job starts), by a job that waits for
+        # its publisher on main (`mode: enforced`):
+        #   SUPABASE_PROJECT_REF, SUPABASE_DB_PASSWORD
+        #                                  cloudflare-hyperdrive (its origin)
+        #                                  and db-migrate, per environment
+        #   SUPABASE_DB_URL                db-migrate, per environment
+        #   WIRING_CLOUDFLARE_HYPERDRIVE   web's deploy, both rungs in each job
+        # A missing document fails that lane, so a green run already says all
+        # four are there. testing/phases.test.sh fails if one of them loses
+        # its reader, and asks for an `orun.secrets/exists@v1` await again for
+        # any key nothing in the convergence reads.
+        - id: verify
+          uses: orun.http/probe@v1
+          narrate: "The app and its database check answered on stage and prod."
+          with:
+            urls:
+              - "https://{{ .inputs.reponame }}-web-stage.{{ .inputs.subdomain }}.workers.dev"
+              - "https://{{ .inputs.reponame }}-web-stage.{{ .inputs.subdomain }}.workers.dev/api/health"
+              - "https://{{ .inputs.reponame }}-web-prod.{{ .inputs.subdomain }}.workers.dev"
+              - "https://{{ .inputs.reponame }}-web-prod.{{ .inputs.subdomain }}.workers.dev/api/health"
+
+  # Places nothing. It records what 01-product built, from PROBED facts rather
+  # than from what the blueprint intended — which is why it runs last. Its
+  # render probes every URL as it writes the record, and this landing
+  # redeploys nothing, so there is no probe after it to wait for.
+  - name: 02-docs
+    title: The deployment, recorded
+    description: The live-deployment manifest, rendered from probed reality, and the promotion gate and dev's lanes put back.
+    # An estimate: the render's probes, a landing checked in the box, a merge.
+    expectedMinutes: 1
+    narrate:
+      start:  "Now recording what was actually built — probing every URL, noting how much of the docs is indexed and which model writes the answers, and writing the deployment manifest into the repository."
+      done:   "ai/context/deployment.md now records the live deployment, written from probed facts, and prod waits on stage again. {{ .meta.elapsed }}."
+      failed: "The deployment record did not land. The product is still live; only the write-up is missing."
+    modules: []
+    requires:
+      phases: [01-product]
+    hooks:
+      post:
+        # THE PRODUCT GOES LIVE WITH ITS PROMOTION GATE. 01-product deferred
+        # `prod.promotion.dependsOn: [stage]`; this, the last landing, puts it
+        # back, and from here on a change reaches prod only after stage.
+        # Restoring touches only intent.yaml's `environments` section, which
+        # `orun plan --changed` maps to no component, so this landing
+        # redeploys nothing.
+        - id: promotion
+          run: ["node", "{{ .baseline.dir }}/tooling/bootstrap/promotion.mjs", "--restore"]
+        # And dev verifies every merge to main again (01-product deferred it).
+        - id: dev-lanes
+          run: ["node", "{{ .baseline.dir }}/tooling/bootstrap/dev-lanes.mjs", "--restore"]
+        - id: render
+          run: ["bash", "{{ .baseline.dir }}/hooks/render-deployment-docs.sh", ".", "{{ .inputs.orunWorkspace }}", "{{ .baseline.dir }}"]
+        - id: task
+          uses: orun.task/ensure@v1
+          with:
+            kind: task
+            epic: "{{ .inputs.epicSlug }}"
+            milestone: "{{ .phase.name }}"
+            name: "Record the live deployment"
+            prefix: BASE
+            contract: .baseline/tasks/02-docs.TaskContract.yaml
+        # Checked here and merged, as 01-product's landing is.
+        - id: land
+          uses: orun.pr/land@v1
+          narrate: "The deployment record is merged into main."
+          with:
+            task: "{{ .phase.hooks.task.outputs.key }}"
+            epic: "{{ .inputs.epicSlug }}"
+            branchSlug: "{{ .phase.name }}"
+            title: "docs(deployment): record the live deployment state"
+            checks: local

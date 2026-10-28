@@ -1,0 +1,175 @@
+# The doc-search card: what the console's Blueprints page renders and the
+# platform's bootstrap door consumes.
+#
+# THIS FILE IS NOT THE BUILD. `spec.bootstrap.blueprint` names the build
+# document — `repo-blueprint.yaml`, whose phases a runner places. This card is
+# what an operator reads and fills in before pressing Build, and
+# `testing/manifest.test.sh` compares every list below to the document that
+# actually does the thing, not to a copy of itself.
+#
+# The division of labour with the registry is strict: the registry (orun-cloud
+# `infra/baselines-registry/baselines.yaml`) owns identity and commerce — id,
+# visibility, tier, the pinned tag. This file owns the build contract. Neither
+# restates the other, which is why there is no `tag` here: this file is
+# fetched AT the tag the registry pins.
+apiVersion: orun.io/v1
+kind: Blueprint
+metadata:
+  name: doc-search
+  displayName: Doc Search — AI answers from your docs on Workers AI and Supabase
+  description: >
+    Supabase's Next.js OpenAI Doc Search Starter as a product of its own: a
+    search dialog that answers questions about your Markdown docs, from the
+    sections closest to the question — split by heading, embedded and stored
+    in pgvector. It embeds and answers with Workers AI through the Worker's
+    AI binding, so it needs no AI vendor key; OpenNext builds it into one
+    Cloudflare Worker, and its Postgres is a Supabase project reached through
+    Hyperdrive. Terraform creates both per environment, db-migrate applies
+    the schema, CI deploys it all to stage and prod on merge, in that order,
+    and every deploy indexes the docs it ships with. It creates TWO Supabase
+    projects, stage and prod: the organization needs room for both
+    (Supabase's free plan allows two active projects per organization). Live
+    in about eighteen minutes.
+  tags: [ai, docs, search, pgvector, workers-ai, supabase, nextjs]
+spec:
+  source:
+    repo: sourceplane/doc-search
+    # No `tag`. The registry pins it; this file is fetched at it.
+
+  # ── What the operator reads first ────────────────────────────────────────
+  overview:
+    lede: >
+      A search over your docs that answers in prose — Workers AI for the
+      models, Supabase Postgres with pgvector for the index, Terraform holding
+      the data plane, and no AI vendor key to bring.
+    architecture:
+      - layer: Edge
+        items: [web, Workers AI]
+      - layer: Data
+        items: [Supabase Postgres + pgvector, Hyperdrive, db-migrate]
+      - layer: Delivery
+        items: [Terraform, GitHub Actions, OpenNext]
+    outcome:
+      - Live on stage and prod, answering on Workers AI
+      - The docs indexed into pgvector by every deploy
+      - OpenAI for the answers only if you add its key
+
+  requires:
+    # GitHub arrives as the App installation plus the repo link; Cloudflare
+    # and Supabase are the two provider connections the build mints from.
+    # No AI vendor is here: the models are Workers AI's, reached through the
+    # Worker's AI binding in the Cloudflare account the app deploys into.
+    # OpenAI for the answers is optional and its owner adds the key afterwards
+    # (the product's README, "Use OpenAI for the answers").
+    integrations: [github, cloudflare, supabase]
+    apiKeyRole: admin          # secret writes need the admin floor
+
+  # Every input is collected by the console: keys are lowercase (the
+  # platform's reader refuses anything else), every one carries the `pattern`
+  # its value is checked against before Continue, and a value the console
+  # already holds says so with `from`. repo-blueprint.yaml declares the same
+  # names; `repoPrivate`, `orunWorkspace` and `epicSlug` are build inputs with
+  # defaults (or filled from the build's workspace) and are not asked.
+  #
+  # NOR IS THE DOMAIN. The product goes live on workers.dev, and a domain is an
+  # owner's step after the bootstrap: `productdomain` defaults to empty, the
+  # rebrand writes the reserved placeholder `<reponame>.example.com` where
+  # the domain goes, and the product's README ("Custom domain") says how to set
+  # it. Nothing that needs a domain is removed — it waits for one.
+  inputs:
+    - key: reponame
+      label: Repo name
+      pattern: "^[a-z][a-z0-9-]{1,38}$"
+      # The operator picked the repository; its name IS this value.
+      from: repo.name
+    - key: productname
+      label: Product name
+      pattern: "^[A-Za-z0-9][A-Za-z0-9 .,'&-]{1,48}$"
+      help: The name people see — the page's title, in every tab and bookmark.
+      example: Acme Docs
+    - key: githuborg
+      label: GitHub organisation
+      pattern: "^[A-Za-z0-9][A-Za-z0-9-]*$"
+      help: The GitHub org or user the product's repository is created under.
+      # DERIVED FROM THE CHOSEN REPOSITORY: its owner IS this value. Declared
+      # because repo-blueprint.yaml requires it — a build may declare more
+      # inputs than this card, but not require one nobody supplies.
+      from: repo.owner
+    - key: subdomain
+      label: workers.dev subdomain
+      pattern: "^[a-z0-9][a-z0-9-]{0,62}$"
+      help: The workers.dev subdomain of the Cloudflare account the app deploys into.
+      example: acme
+      # READ FROM THE CLOUDFLARE CONNECTION, not asked. The subdomain belongs
+      # to the account the same way its id does, and there is exactly one
+      # right answer — a typed one could only be wrong, and wrong showed up
+      # after deploy, in the public origin the Open Graph image link is built
+      # from, the deploy's smoke, the phase probes and the verify URLs below.
+      # The integration reads it from Cloudflare at connect and on its hourly
+      # health check; the bootstrap door fills this input from the connection
+      # the build is BOUND to, the same one CLOUDFLARE_ACCOUNT_ID and the
+      # deploy tokens mint from, so all three name one account. The console
+      # renders no field for it. An account with no workers.dev subdomain
+      # refuses the build at the door, naming the fix, before anything is
+      # created.
+      from: connection.cloudflare.workersSubdomain
+
+  # ── PREVIEW ONLY. repo-blueprint.yaml's `orun.integrations/reconcile@v1`
+  # hooks mint these, brokered, during 01-product — one hook per provider. ─
+  # Transcribed from those hooks' own `provider:` and `secrets:` ({key,
+  # template}) values, in their order, so testing/manifest.test.sh compares
+  # this list to the document that mints them. The console renders them
+  # read-only: no credential is ever typed, shown or stored. Keys that
+  # already exist are kept. Five keys, five scopes, on purpose — the deploy
+  # token deliberately cannot touch Hyperdrive. No AI key is here: Workers
+  # AI is the account's own.
+  secrets:
+    - key: CLOUDFLARE_API_TOKEN
+      provider: cloudflare
+      template: workers-deploy
+      why: Deploys the app's Worker, its static assets and its Workers AI binding
+    - key: CLOUDFLARE_HYPERDRIVE_TOKEN
+      provider: cloudflare
+      template: hyperdrive-edit
+      why: Hyperdrive — the deploy token deliberately cannot touch it
+    - key: CLOUDFLARE_ACCOUNT_ID
+      provider: cloudflare
+      template: account-id
+      why: Connection fact, not a secret
+      fact: true
+    - key: SUPABASE_ACCESS_TOKEN
+      provider: supabase
+      template: management-access
+      why: Project create and migrations
+    - key: SUPABASE_ORG_ID
+      provider: supabase
+      template: org-id
+      why: Connection fact, not a secret
+      fact: true
+
+  # ── PREVIEW ONLY. repo-blueprint.yaml's run-level `hooks.preInstantiate`
+  # opens these — the epic, every milestone in this order, every task — before
+  # the first phase places. Idempotent by identity, so a re-run finds what it
+  # made before.
+  programme:
+    epicSlug: docs-baselining          # = repo-blueprint.yaml's `epicSlug` default
+    epicName: "Doc search baselining — {productname}"
+    milestones:
+      - name: 01-product
+      - name: 02-docs
+
+  bootstrap:
+    # THE BUILD DOCUMENT. There is no umbrella workflow and no agent brief:
+    # every phase is declared in it and orun runs it.
+    blueprint: repo-blueprint.yaml
+    # Summed from the phases' expectedMinutes (17 + 1). An estimate until a
+    # bootstrap measures it: a Supabase project takes five to seven minutes to
+    # come up, and the app's deploy waits on it, on Hyperdrive and on the
+    # migrations.
+    expectedMinutes: 18
+    tokenChannel: ORUN_TOKEN_FILE   # how a runner hands over its refreshed token
+  verify:
+    urls:
+      - "https://{reponame}-web-{env}.{subdomain}.workers.dev"
+      - "https://{reponame}-web-{env}.{subdomain}.workers.dev/api/health"
+    envs: [stage, prod]
