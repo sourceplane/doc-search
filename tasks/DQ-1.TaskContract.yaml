@@ -1,0 +1,15 @@
+apiVersion: orun.io/v1
+kind: TaskContract
+metadata:
+  name: DQ-1
+  title: "The spec"
+spec:
+  goal: The doc-search repository is born with its intent, CI, tooling and spec index, and the doc-search epic — declaration, doc set and task contracts — is on main
+  affects:
+    - specs/epics/doc-search
+    - specs/epics/README.md
+    - tasks
+  doneWhen:
+    - epic.yaml, README, design, implementation plan, risks and status are on main
+    - the three task contracts exist
+  gates: []

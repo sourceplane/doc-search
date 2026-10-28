@@ -1,0 +1,13 @@
+# doc-search — risks and open questions
+
+| ID | Risk | State | Notes |
+|---|---|---|---|
+| DQ-A | The models are verified only against a stand-in | OPEN | The stand-in answers in Workers AI's shapes (BGE's `{shape, data}`, Llama's server-sent events), so the provider, the route, the sync and the stream are real; how well bge-base-en-v1.5 retrieves these docs' sections and what Llama 4 Scout writes from them is not tested. A live bootstrap answers that; OpenAI for the answer is one Worker secret away |
+| DQ-B | The brokered `workers-deploy` token and the `ai` binding | OPEN | No deploy with the brokered token has uploaded a script with an `ai` binding. Cloudflare may ask for a Workers AI permission group; BOOTSTRAP.md's troubleshooting names the fix. The first live deploy closes it |
+| DQ-C | The deploy's smoke indexes the docs | OPEN | A Workers AI or Hyperdrive outage at deploy time fails the smoke and the lane (a re-run skips the stored pages), and a deploy with many changed pages makes one request embed them all. The sample is one page; a large doc set may need the indexing split into batches |
+| DQ-D | `MATCH_THRESHOLD`'s default | OPEN | 0.6 cosine is chosen for BGE base, not measured on these docs; upstream's 0.78 was ada-002's inner product. It is a Worker secret per environment (not a var, which the next deploy would reset); measure real scores after the first live bootstrap |
+| DQ-E | `POST /api/embeddings` takes no credential | ACCEPTED | It can only embed the docs the Worker was built with; an unchanged page costs one SELECT, and `?refresh=1` re-embeds a handful of sections. A large doc set would want it behind a secret |
+| DQ-F | Two Supabase projects per product | ACCEPTED | Stage and prod are a project each; Supabase's free plan allows two active projects per organization. BOOTSTRAP.md lists it as a prerequisite |
+| DQ-G | pgvector on a real Supabase project | ACCEPTED | `010` creates the `vector` extension as `postgres` through the Management API, as rag-chatbot's does on Supabase; the e2e's stand-in Postgres creates it as superuser, so a real db-migrate apply is the first time `postgres` itself runs it |
+| DQ-H | `react-hooks/immutability`, `no-explicit-any`, `prefer-as-const` and `no-empty-object-type` are off | ACCEPTED | Upstream's code, kept as written, fails rules new in eslint-config-next 16; each is off by name with the reason in `eslint.config.mjs` |
+| DQ-I | Sections over 512 tokens are embedded from their first 2000 characters | ACCEPTED | BGE reads 512 tokens; upstream's model read 8191. The whole section is stored and still goes to the answer as context; the sample's longest section is 1914 characters |
