@@ -1,0 +1,14 @@
+# Task contract template for the 02-docs landing. See 01-product's header.
+apiVersion: orun.io/v1
+kind: TaskContract
+spec:
+  goal: The live deployment is recorded from verified facts as agent-readable state in the product's repo, and the bootstrap's deferrals are put back
+  affects:
+    - ai/context/deployment.md
+    - ai/context/operations.md
+    - README.md
+    - intent.yaml
+  doneWhen:
+    - committed deployment manifest matches probed reality
+    - prod waits on stage again, and dev verifies every merge to main again
+  gates: []

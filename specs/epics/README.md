@@ -7,6 +7,6 @@ folder is the adoption; the merge creates the epic in the workspace.
 
 | Epic | Cluster | Status | What it is |
 |------|---------|--------|------------|
-| [`doc-search/`](./doc-search/) | **DQ** | In progress (DQ1: the site on Workers) | Supabase's Next.js OpenAI Doc Search — a ⌘K dialog answering questions about the site's own MDX docs — on Cloudflare Workers with Workers AI and Supabase pgvector through Hyperdrive, the docs indexed by the deployed Worker on every deploy, and an Orun baseline that instantiates it in one landing (DQ2) |
+| [`doc-search/`](./doc-search/) | **DQ** | ✅ Shipped (`baseline-v1`); live bootstrap pending | Supabase's Next.js OpenAI Doc Search — a ⌘K dialog answering questions about the site's own MDX docs — on Cloudflare Workers with Workers AI and Supabase pgvector through Hyperdrive, the docs indexed by the deployed Worker on every deploy, and an Orun baseline that instantiates it in one landing (DQ2) |
 
 As-built ≠ intent: what shipped lives in each epic's `IMPLEMENTATION-STATUS.md`.

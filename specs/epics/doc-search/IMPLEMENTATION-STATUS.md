@@ -4,7 +4,7 @@
 |---|---|---|
 | DQ0 — the spec | ✅ | DQ-1 |
 | DQ1 — the doc search on Workers and Supabase | ✅ | DQ-2 |
-| DQ2 — a baseline | planned | DQ-3 |
+| DQ2 — a baseline | ✅ | DQ-3, tagged `baseline-v1` |
 
 ## Departures from the upstream template
 

@@ -11,9 +11,10 @@ binding, its index a **Supabase** project's database reached through
 **Cloudflare Hyperdrive**, both provisioned by Terraform through
 [Orun](https://github.com/sourceplane/orun) and the schema applied by Orun's
 `db-migrate`, the way the
-[rag-chatbot baseline](https://github.com/sourceplane/rag-chatbot) does it, deployed by
-[Orun](https://github.com/sourceplane/orun) to stage and prod on every merge.
-Packaging it as an Orun baseline is the next milestone (DQ2).
+[rag-chatbot baseline](https://github.com/sourceplane/rag-chatbot) does it,
+and packaged as an **Orun baseline**: one command takes a new product from
+nothing to live on stage and prod, in its own repository, under its own
+name — in ONE landing.
 
 The template's code is the code. What the port changes is what the Workers
 runtime and a fresh, unattended deployment force: the database is reached
@@ -29,9 +30,61 @@ in the build; here the build only splits the docs into sections
 `/api/embeddings`, where the Worker embeds the pages whose checksum the
 database does not hold through its own AI binding. The column and the search
 function are sized to Workers AI's embedding model (768 dimensions, migration
-`020_workers_ai_embeddings`). See [`specs/epics/doc-search`](specs/epics/doc-search/README.md)
+`020_workers_ai_embeddings`). What the baseline adds is everything needed to
+make a copy of it somebody else's — built the way
+[cirrus-baseline](https://github.com/sourceplane/cirrus-baseline) is. See [`specs/epics/doc-search`](specs/epics/doc-search/README.md)
 for the design, the milestones and the as-built status, including every
 departure.
+
+## Instantiating a product
+
+```bash
+git clone --depth 1 --branch <baseline-tag> https://github.com/sourceplane/doc-search
+cd doc-search
+orun new --blueprint repo-blueprint.yaml --out ~/products/acme-docs --run-hooks --resume \
+  --set reponame=acme-docs --set productname="Acme Docs" \
+  --set githuborg=acme-inc --set subdomain=<workers-dev-subdomain>
+```
+
+Or, once the platform's registry lists it, from the Orun console (Baselines →
+`doc-search` → Build). Two phases: **`01-product`** creates the repository,
+mints the five brokered credentials (Cloudflare and Supabase) and lands the
+whole product as one pull request, whose convergence on `main` provisions and
+deploys it per environment in a fixed order —
+
+```
+supabase ──▶ cloudflare-hyperdrive ──▶ db-migrate ──▶ web
+```
+
+— each edge `mode: enforced` on a push to main and advisory on a pull
+request; then **`02-docs`** records the live deployment from probed facts.
+**[BOOTSTRAP.md](BOOTSTRAP.md)** is the operator guide;
+[docs/phases/](docs/phases/README.md) has a page per phase.
+
+**It creates two Supabase projects**, `<reponame>-stage` and
+`<reponame>-prod`. Supabase's free plan allows two active projects per
+organization, so the connected organization needs room for both
+(BOOTSTRAP.md, §0).
+
+The new repository receives the **product only** — the app, the Terraform
+roots, the migrations, the tests, its CI, its tooling, a README of its own
+and its operating contract — renamed throughout to the product's name,
+repository, Worker, Supabase project and Hyperdrive config. None of this
+repository's machinery ships. **No AI vendor key is asked for**: Workers AI
+needs none, and OpenAI for the answers is the owner's to add afterwards (the
+product's README, "Use OpenAI for the answers").
+
+| What makes it a baseline | Where |
+|---|---|
+| The console card (inputs, secrets, programme) | `blueprint.yaml` |
+| The build document (modules, phases, hooks) | `repo-blueprint.yaml` |
+| This tree's identity, the product's README and the bootstrap's task contracts | `.baseline/` |
+| The rename engine (product-name seam: `apps/web/lib/site.ts`) | `tooling/rebrand/rebrand.mjs` |
+| The bootstrap's helpers (deferrals, redeploy marker, work-tree strip) | `tooling/bootstrap/` |
+| The deployment-record renderer | `hooks/render-deployment-docs.sh` |
+| The product's context pack | `ai/context/` |
+| The baseline's tests: contract, leak, offline bootstrap and plans, end to end (with a Workers AI stand-in) | `testing/`, `.github/workflows/baseline.yml` |
+| Cutting a `baseline-vN` tag | `.github/workflows/tag.yml` |
 
 ## What is here (the product)
 
@@ -85,3 +138,5 @@ here carries.
 | Workflow | What it runs | Ships to a product |
 |---|---|---|
 | `ci.yml` | the Orun pipeline, and the only workflow a product carries: `orun plan --changed`, then one job per lane. A pull request runs the verify lanes (the app built and dry-deployed per environment, both Terraform roots checked and planned, the migrations planned); no lane runs the `typecheck`, `lint` or `test` scripts — `baseline.yml`'s e2e tier runs them on the bootstrapped product before every tag, and a product's developers run them before they push. The bootstrap's own landings (`orun/BASE-*`) run `plan` alone and nothing waits for it — the landing was checked in the build box; a merge applies, migrates and deploys stage → prod. It plans nothing while `intent.yaml` names the placeholder workspace `ws_CHANGE_ME`, as this repository does. A manual run (Orunbase's Deploy button, or Run workflow on `main`) plans the environment and components it names under the push-to-main trigger, so they deploy as a merge deploys them | yes |
+| `baseline.yml` | the baseline's own tiers: contract tests; the blueprint read by the pinned orun, the leak gate, the offline bootstrap and the product's own plans; the product built, migrated into a local Postgres with pgvector, dry-deployed, served with Workers AI stood in for, its docs indexed by its own smoke and asked about | no |
+| `tag.yml` | cuts a `baseline-vN` tag (manual) | no |

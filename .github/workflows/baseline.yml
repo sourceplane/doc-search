@@ -1,0 +1,160 @@
+name: Baseline CI
+
+# THE FACTORY'S OWN LANES — this repository tested as a BASELINE: that its
+# build document parses with the orun a bootstrap actually runs, that its card
+# agrees with it, that every component is placed by exactly one phase, that a
+# placed tree comes up branded and carrying nothing of the factory, that the
+# product's own push-to-main plan deploys infra before app, and that the
+# product installs, builds, migrates, deploys (dry), serves, and adds a
+# document to its knowledge base and answers from it with no AI vendor key.
+#
+# ─── WHY THIS IS NOT IN ci.yml ────────────────────────────────────────────
+#
+# `repo-blueprint.yaml`'s `github-workflows` module copies the WHOLE `.github`
+# directory into every product built from this repository. These jobs run
+# `testing/*.sh`, and `testing/` is deliberately not placed — so in a product
+# they would be steps that cannot pass, red on its very first pull request. This
+# file is in the blueprint's `ignore` list, and `testing/coverage.test.sh`
+# fails on any workflow that reads `testing/` and is not.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: baseline-ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  # Tier 0. bash, python3 and git; node for the tools. No workspace install,
+  # no network, no credential — the job that most certainly fails a PR.
+  baseline-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          # setup-node v5 turns on the pnpm cache by itself when package.json
+          # names a packageManager, and then fails on a runner with no pnpm.
+          # This job installs nothing.
+          package-manager-cache: false
+      - name: Contract tests (manifest, phases, coverage, rebrand, retouch, bootstrap-defer)
+        run: |
+          set -euo pipefail
+          python3 -c 'import yaml' 2>/dev/null || pip install --quiet pyyaml
+          for t in manifest phases coverage rebrand retouch bootstrap-defer; do
+            echo "── $t"
+            bash "testing/$t.test.sh"
+          done
+      # Every component's docs/{overview,architecture,runbook}.md is generated
+      # from what the component declares (its manifest, Worker config,
+      # Terraform, migrations, package scripts). A pull request that changes
+      # one of those facts without regenerating the pages fails here.
+      - name: Component docs match their manifests
+        run: python3 tooling/catalog/gen-component-docs.py --check
+
+  # Tier 1. THE BLUEPRINT, READ AND PLACED BY THE BINARY A BOOTSTRAP RUNS.
+  #
+  # Pinned at the bootstrap floor (BOOTSTRAP.md), not the product's lane pin:
+  # every test here reads YAML with PyYAML, which parses anything well-formed;
+  # only the pinned orun can say whether the document is one a bootstrap can
+  # run. `--status` parses it, validates every hook against the action
+  # registry, compiles every `when` and narration template, and writes
+  # nothing. Then the leak gate (what a product would carry) and the
+  # placement tier (the offline bootstrap: both phases placed and finished by
+  # the blueprint's own hooks, then the product's own `orun plan` for the
+  # 01-product merge — supabase, then cloudflare-hyperdrive, then db-migrate,
+  # then web, enforced — and a --resume that changes nothing). The floor is
+  # v2.88.0 (the task set-up in the background, the landings checked in the
+  # box, the deploy credentials minted in one `secrets` reconcile per
+  # provider), newer than the product's lane pin (v2.78.4, ci.yml), so the
+  # product's own plans here read the per-edge `modeRules` as its CI does.
+  blueprint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: sourceplane/orun-action@v1.2.0
+        with:
+          version: v2.88.0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.12.1
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          # This job installs nothing either: with no lockfile hook the offline
+          # bootstrap never runs pnpm, so there is no store, and the pnpm cache
+          # setup-node v5 turns on by itself (package.json names a packageManager)
+          # fails the job saving a path that does not exist whenever no earlier
+          # cache exists for the lockfile.
+          package-manager-cache: false
+      - name: repo-blueprint.yaml, read by the pinned CLI
+        run: |
+          set -euo pipefail
+          orun --version
+          python3 -c 'import yaml' 2>/dev/null || pip install --quiet pyyaml
+          # Required inputs must be supplied for the document to resolve; the
+          # values are arbitrary and nothing is written.
+          orun new --blueprint repo-blueprint.yaml --status \
+            --out "$(mktemp -d)" \
+            --set reponame=acme-docs \
+            --set "productname=Acme Answers" \
+            --set githuborg=acme-inc
+      - name: the leak gate — what a product carries
+        run: bash testing/leak.test.sh
+      - name: placement — the offline bootstrap, and the product's own plan
+        run: |
+          git config --global user.email ci@example.invalid
+          git config --global user.name "baseline ci"
+          bash testing/placement.test.sh
+
+  # Tier 2. THE PRODUCT IT PRODUCES WORKS: the 01-product landing installed,
+  # its fixture rendered, type-checked, linted, tested and built (its own pull
+  # request runs `plan` alone, and the landing is checked in the box with
+  # `orun validate` and `orun plan`); the migrations applied by the product's
+  # own runner to a local Postgres (through a stand-in for the one Supabase
+  # Management API endpoint it calls); the stage lane's own structure check,
+  # build, output check and dry deploy in the job tree orun stages; and the
+  # built Worker served over that database with no AI vendor key — its smoke,
+  # which indexes the docs into pgvector, every route, and a question answered
+  # from the section retrieved by vector similarity. Workers AI is not reachable from a runner
+  # with no Cloudflare account, so `wrangler dev` binds AI to a deterministic
+  # stand-in (testing/lib/fake-workers-ai.js); the real models are not called
+  # here. Pinned at the bootstrap floor (v2.88.0): the offline bootstrap reads
+  # the blueprint, and the floor is newer than the product's lane pin
+  # (v2.78.4), which is all the lane steps need. The runner image carries
+  # PostgreSQL (not started); the test starts its own on a random port, with
+  # pgvector, installed below.
+  product:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: sourceplane/orun-action@v1.2.0
+        with:
+          version: v2.88.0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.12.1
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+      # The schema is pgvector's (the docs' section embeddings), and the runner's
+      # PostgreSQL does not ship it: the package for its newest major.
+      - name: pgvector for the runner's PostgreSQL
+        run: |
+          set -euo pipefail
+          major="$(ls /usr/lib/postgresql | sort -n | tail -1)"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq "postgresql-${major}-pgvector"
+      - name: e2e — the bootstrapped product builds, migrates, deploys (dry) and serves
+        run: |
+          python3 -c 'import yaml' 2>/dev/null || pip install --quiet pyyaml
+          git config --global user.email ci@example.invalid
+          git config --global user.name "baseline ci"
+          bash testing/e2e.test.sh

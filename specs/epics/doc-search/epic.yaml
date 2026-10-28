@@ -9,7 +9,7 @@ metadata:
 spec:
   title: "Supabase's Next.js OpenAI Doc Search on Cloudflare Workers"
   summary: "Supabase's Next.js OpenAI Doc Search Starter — a ⌘K dialog that answers a question about a site's MDX docs from the sections closest to it — run on Cloudflare Workers + Static Assets through @opennextjs/cloudflare, the docs embedded and the answer written by Workers AI through the Worker's AI binding (OpenAI for the answer optional), its Postgres a Supabase project with pgvector reached through Hyperdrive, both provisioned by Terraform; the schema applied by db-migrate, the docs indexed by the deployed Worker on every deploy, never by a build holding a credential; and become an Orun baseline that takes a new product from nothing to live on stage and prod in one landing."
-  state: started
+  state: completed
   milestones:
     - name: "DQ0 — the spec"
       exitCriteria:
