@@ -1,0 +1,19 @@
+{
+  "extends": "../../tooling/tsconfig/web.json",
+  "compilerOptions": {
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "types": ["node"],
+    // The tests import the app's modules as the app compiles them: its
+    // tsconfig allows JS (lib/env.mjs) and does not index-check arrays.
+    "allowJs": true,
+    "noUncheckedIndexedAccess": false,
+    "paths": {
+      "@/*": ["../../apps/web/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "../../apps/web/cloudflare-env.d.ts"]
+}

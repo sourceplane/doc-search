@@ -10,3 +10,17 @@ onlyBuiltDependencies:
   - esbuild
   - workerd
   - sharp
+
+# tests/db runs the migrations in PGlite (Postgres compiled to WASM, with
+# pgvector), and tests/web serves one over a socket to the app's own
+# postgres client (@electric-sql/pglite-socket, whose PGlite is a peer). One
+# version for all of them, pinned: the app never imports it, and a peer must
+# not float to whatever was published yesterday.
+overrides:
+  "@electric-sql/pglite": "0.5.8"
+  # Upstream's lockfile resolved @types/mdast 3.0.11's `@types/unist: "*"` to
+  # 2.0.6, the version its MDX libraries (mdast-util-*, unist-util-filter)
+  # are typed against; a fresh resolution picks unist 3, whose Node type the
+  # mdast 3 Root no longer matches, and apps/web/lib/docs/process-mdx.ts no
+  # longer typechecks. Held at upstream's.
+  "@types/unist": "2.0.6"

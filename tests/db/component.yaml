@@ -1,0 +1,31 @@
+apiVersion: sourceplane.io/v1
+kind: Component
+metadata:
+  name: db-tests
+  description: The migrations' tests (the manifest and its checksums, upstream's schema verbatim, the embedding column and the search function at Workers AI's 768 dimensions and cosine similarity, and Supabase's Data API roles shut out of both tables and both functions after every migration, on an in-process Postgres with pgvector)
+spec:
+  type: turbo-package
+  lifecycle: production
+  owner: platform
+  # Its pages, attached to it in the workspace's catalog: what the Docs
+  # library shows for it, and what the catalog's docs and runbook checks read.
+  # Generated from what this manifest and its sources declare.
+  docs:
+    overview: docs/overview.md
+    pages:
+      - { path: docs/architecture.md, role: architecture, title: Architecture }
+      - { path: docs/runbook.md, role: runbook, title: Runbook }
+  domain: tests
+  subscribe:
+    environments:
+      - name: dev
+        profile: quick-check
+  parameters:
+    nodeVersion: "22"
+    pnpmVersion: "10.12.1"
+    buildCommand: pnpm exec turbo run build --filter=./
+    typecheckCommand: pnpm exec turbo run typecheck --filter=./
+    preBuildCommand: pnpm exec turbo run test --filter=./
+  labels:
+    team: platform
+    layer: test

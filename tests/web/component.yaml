@@ -1,0 +1,31 @@
+apiVersion: sourceplane.io/v1
+kind: Component
+metadata:
+  name: web-tests
+  description: The app's tests (the search, indexing and health routes over a real Postgres with pgvector, the sync of the docs index and what it stores, skips and retries, the models on Workers AI and OpenAI, the committed docs index, the name seam, the committed wrangler config)
+spec:
+  type: turbo-package
+  lifecycle: production
+  owner: platform
+  # Its pages, attached to it in the workspace's catalog: what the Docs
+  # library shows for it, and what the catalog's docs and runbook checks read.
+  # Generated from what this manifest and its sources declare.
+  docs:
+    overview: docs/overview.md
+    pages:
+      - { path: docs/architecture.md, role: architecture, title: Architecture }
+      - { path: docs/runbook.md, role: runbook, title: Runbook }
+  domain: tests
+  subscribe:
+    environments:
+      - name: dev
+        profile: quick-check
+  parameters:
+    nodeVersion: "22"
+    pnpmVersion: "10.12.1"
+    buildCommand: pnpm exec turbo run build --filter=./
+    typecheckCommand: pnpm exec turbo run typecheck --filter=./
+    preBuildCommand: pnpm exec turbo run test --filter=./
+  labels:
+    team: platform
+    layer: test

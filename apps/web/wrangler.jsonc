@@ -1,0 +1,56 @@
+// wrangler.template.jsonc is the source and wrangler.jsonc is rendered from
+// it by tooling/wire: edit the template, never the render. Two renders:
+//
+//   - committed: the render from wiring.fixture.json (`pnpm run wire:fixture`),
+//     a placeholder Hyperdrive id. `wrangler dev`, `next dev`, the dev verify
+//     lane and the composition's structure check (which runs BEFORE the build,
+//     in a fresh checkout) all read it, so it has to exist without a build.
+//     Edit this file and re-render; tests/web fails when the two disagree.
+//   - deployed: the stage and prod lanes re-render it inside their own job
+//     tree, before the build, from the wiring document the
+//     `cloudflare-hyperdrive` Terraform root lease-publishes
+//     (WIRING_CLOUDFLARE_HYPERDRIVE_<ENV>, apps/web/component.yaml).
+//
+// The workers-assets composition deploys one environment per job with no
+// wrangler `--env`, so a placeholder token names the environment a render is
+// for.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "doc-search-web",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "observability": { "enabled": true },
+  // The Supabase project's Postgres (with pgvector), fronted by Hyperdrive.
+  // lib/db/index.ts builds its `postgres` client per call from
+  // env.HYPERDRIVE.connectionString (upstream reached the database through
+  // Supabase's Data API with the service-role key). Locally — `wrangler dev`,
+  // `opennextjs-cloudflare preview` and `next dev` through the platform proxy —
+  // the binding points at the localConnectionString below: a Postgres on
+  // localhost with the `vector` extension available (README → Local
+  // development), with packages/db's migrations applied.
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "00000000000000000000000000000001",
+      "localConnectionString": "postgres://postgres:postgres@localhost:5432/docs"
+    }
+  ],
+  // Workers AI, the embedding model and the answer model both
+  // (lib/ai/models.ts). Nothing to provision and no key: the binding is the
+  // Cloudflare account the Worker deploys into, billed to it (Workers AI's
+  // free allocation first). Locally it always reaches that account —
+  // `wrangler dev` and `next dev` ask you to `wrangler login` the first time
+  // the docs are indexed or searched; nothing else needs it.
+  "ai": {
+    "binding": "AI"
+  }
+  // Secrets are never vars. OPENAI_API_KEY is optional: set as a Worker
+  // secret (`wrangler secret put OPENAI_API_KEY --name <worker>`, README →
+  // "Use OpenAI for the answers"), the answers are upstream's OpenAI model's;
+  // unset, they are Workers AI's. Locally it goes in .dev.vars.
+}

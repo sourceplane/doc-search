@@ -1,0 +1,127 @@
+apiVersion: sourceplane.io/v1
+kind: Component
+metadata:
+  name: web
+  description: Vercel's Next.js OpenAI Doc Search Starter (Next.js on Cloudflare Workers + Static Assets via @opennextjs/cloudflare, Workers AI for embeddings and answers, the docs indexed into Supabase pgvector on every deploy, per environment)
+spec:
+  type: cloudflare-workers-assets-turbo
+  lifecycle: production
+  owner: platform
+  # Its pages, attached to it in the workspace's catalog: what the Docs
+  # library shows for it, and what the catalog's docs and runbook checks read.
+  # Generated from what this manifest and its sources declare.
+  docs:
+    overview: docs/overview.md
+    pages:
+      - { path: docs/architecture.md, role: architecture, title: Architecture }
+      - { path: docs/runbook.md, role: runbook, title: Runbook }
+  # `app`, not `web`: a domain and a component share one name space in the
+  # catalog, and a domain called `web` hid this component from it.
+  domain: app
+  path: apps/web
+  # Its own lane per environment: the Next.js build is the longest job in the
+  # plan, and a shared lane would wait on it.
+  lane: isolated
+  # INFRA BEFORE APP, ENFORCED ON MAIN. A merge to main converges the whole
+  # product in one run: the Supabase project, then the Hyperdrive config over
+  # its database, then the migrations — upstream's pages and sections with
+  # the vector extension and row-level security, the embeddings at Workers
+  # AI's 768 dimensions, the functions closed to the Data API — then this
+  # Worker. Its deploy reads the Hyperdrive id
+  # (WIRING_CLOUDFLARE_HYPERDRIVE_<ENV>, rendered into the HYPERDRIVE binding)
+  # and needs the schema applied, and a job resolves its secrets when it
+  # STARTS — so it waits on both, `mode: enforced`, and the ids the applies
+  # lease-published are there. A pull request deploys nothing, so nothing on
+  # one waits: every edge is advisory there.
+  dependsOn:
+    - component: cloudflare-hyperdrive
+      mode: enforced
+      modeRules:
+        - mode: advisory
+          when:
+            triggerRef: github-pull-request
+    - component: db-migrate
+      mode: enforced
+      modeRules:
+        - mode: advisory
+          when:
+            triggerRef: github-pull-request
+  # The wiring documents the cloudflare-hyperdrive root lease-publishes, one
+  # per deployed environment; tooling/wire/live.mjs picks this job's. Workers
+  # AI needs nothing here: the AI binding is the account the deploy targets.
+  # OPENAI_API_KEY, if an owner wants OpenAI's model for the answers, is a
+  # Worker secret they set once per environment (README); the lane never sets
+  # it.
+  secretEnv:
+    WIRING_CLOUDFLARE_HYPERDRIVE_STAGE: "secret://doc-search/doc-search/stage/WIRING_CLOUDFLARE_HYPERDRIVE"
+    WIRING_CLOUDFLARE_HYPERDRIVE_PROD: "secret://doc-search/doc-search/prod/WIRING_CLOUDFLARE_HYPERDRIVE"
+  subscribe:
+    environments:
+      - name: dev
+        profile: verify
+      - name: stage
+        profile: verify
+        profileRules:
+          - profile: deploy
+            when:
+              triggerRef: github-push-main
+      - name: prod
+        profile: verify
+        profileRules:
+          - profile: deploy
+            when:
+              triggerRef: github-push-main
+  parameters:
+    nodeVersion: "22"
+    pnpmVersion: "10.12.1"
+
+    workspaceDir: ../..
+    appDir: .
+
+    turboFilter: "@app/web"
+    wranglerConfig: wrangler.jsonc
+
+    # @opennextjs/cloudflare emits a Worker entrypoint plus a static-assets
+    # directory bound via ASSETS — both deploy in one `wrangler deploy`.
+    workerEntrypoint: .open-next/worker.js
+    assetsDir: .open-next/assets
+
+    # Per-env worker name: doc-search-web-{dev,stage,prod}.
+    workerName: doc-search-web
+    environmentAwareWorkerName: true
+
+    # The account's workers.dev subdomain; exported to the smoke step as
+    # ${WORKERS_DEV_SUBDOMAIN} and used to build ${DEPLOYED_URL}.
+    workersDevSubdomain: your-workers-subdomain
+
+    installCommand: pnpm install --frozen-lockfile
+    # wrangler.jsonc is COMMITTED — the fixture render, so the composition's
+    # structure check (`test -f wrangler.jsonc`, before the build, in a fresh
+    # checkout) passes. Stage and prod re-render it here, in their own job
+    # tree, from this environment's wiring document, so the Worker binds the
+    # real Hyperdrive config; dev verifies with the fixture and has no wiring.
+    #
+    # No public origin is baked in: the page renders no absolute URL (no Open
+    # Graph image, no canonical link), and every request it makes is to its
+    # own origin. ${ORUN_ENVIRONMENT} the runner sets for every step.
+    buildCommand: if [ "${ORUN_ENVIRONMENT}" != dev ]; then node ../../tooling/wire/live.mjs --template wrangler.template.jsonc --out wrangler.jsonc --components cloudflare-hyperdrive --env "${ORUN_ENVIRONMENT}"; fi && pnpm exec turbo run build --filter=@app/web
+
+    # Smoke — and the docs' indexing, which is the step upstream ran at build
+    # time (`pnpm run embeddings`). After `wrangler deploy`:
+    #   1. the page renders (its search button is in the pre-rendered page);
+    #   2. POST /api/embeddings: the Worker embeds the docs it was built with
+    #      through its AI binding and writes them through Hyperdrive — only
+    #      the pages whose checksum the database does not hold, so a deploy
+    #      that changed no doc embeds nothing — and answers "ok":true only if
+    #      every page stored;
+    #   3. /api/health answers ok with sections in the index: the database
+    #      reachable and migrated, the column at the embedding model's size,
+    #      the docs there to search.
+    # No search is run, so no answer model is called. Each response is
+    # buffered before grep so an early match cannot SIGPIPE curl.
+    smokeCommand: "html=$(curl -sfL \"${DEPLOYED_URL}/\") && echo \"${html}\" | grep -q 'Search...' && indexed=$(curl -sf -X POST \"${DEPLOYED_URL}/api/embeddings\") && echo \"${indexed}\" | grep -q '\"ok\":true' && health=$(curl -sf \"${DEPLOYED_URL}/api/health\") && echo \"${health}\" | grep -q '\"ok\":true' && ! echo \"${health}\" | grep -q '\"sections\":0'"
+  labels:
+    team: platform
+    layer: delivery
+    surface: web
+    runtime: cloudflare

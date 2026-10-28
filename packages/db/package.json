@@ -1,0 +1,30 @@
+{
+  "name": "@saas/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The database migrations and their runner (the db-migrate composition builds this package and runs dist/runner/cli.js plan|apply)",
+  "exports": {
+    ".": "./src/index.ts",
+    "./manifest": "./src/manifest.ts",
+    "./types": "./src/types.ts",
+    "./runner": "./src/runner/index.ts"
+  },
+  "bin": {
+    "db-migrate": "./dist/runner/cli.js"
+  },
+  "scripts": {
+    "build": "tsc --project tsconfig.build.json && cp -r src/migrations dist/",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src",
+    "manifest:check": "node ../../tooling/migrations/manifest.mjs check",
+    "manifest:fix": "node ../../tooling/migrations/manifest.mjs fix",
+    "migrate:plan": "node dist/runner/cli.js plan"
+  },
+  "devDependencies": {
+    "@app/eslint-config": "workspace:*",
+    "@app/tsconfig": "workspace:*",
+    "@types/node": "^22.9.0",
+    "typescript": "^5.8.3"
+  }
+}

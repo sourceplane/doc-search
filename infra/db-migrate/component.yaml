@@ -1,0 +1,82 @@
+apiVersion: sourceplane.io/v1
+kind: Component
+metadata:
+  name: db-migrate
+  description: Applies database migrations to stage and prod Supabase instances
+  labels:
+    domain: infra
+    scope: database
+    team: platform
+    layer: data
+
+spec:
+  type: db-migrate
+  lifecycle: production
+  owner: platform
+  # Its pages, attached to it in the workspace's catalog: what the Docs
+  # library shows for it, and what the catalog's docs and runbook checks read.
+  # Generated from what this manifest and its sources declare.
+  docs:
+    overview: docs/overview.md
+    pages:
+      - { path: docs/architecture.md, role: architecture, title: Architecture }
+      - { path: docs/runbook.md, role: runbook, title: Runbook }
+  domain: infra
+
+  # Migrations read the Supabase connection from the orun secrets the
+  # `supabase` apply lease-publishes, so on main they wait for it — and for
+  # the Hyperdrive config over that database. Nothing here needs Hyperdrive;
+  # the edge is there because a migration is the one step of a convergence a
+  # re-run cannot take back, so it runs only once everything the Worker needs
+  # besides the schema exists, immediately before the Worker deploys. The
+  # order on main is supabase → cloudflare-hyperdrive → db-migrate → web.
+  # Enforced on main, advisory on a pull request (which applies nothing).
+  dependsOn:
+    - component: db
+    - component: supabase
+      mode: enforced
+      modeRules:
+        - mode: advisory
+          when:
+            triggerRef: github-pull-request
+    - component: cloudflare-hyperdrive
+      mode: enforced
+      modeRules:
+        - mode: advisory
+          when:
+            triggerRef: github-pull-request
+
+  path: packages/db/src/migrations
+
+  parameters:
+    nodeVersion: "22"
+    pnpmVersion: "10.12.1"
+    owner: sourceplane
+    repo: doc-search
+
+  # The migration runner's Management-API token (required in apply mode)
+  # resolves from orun secrets — minted fresh per run from the Supabase
+  # integration (management-access template). Replaces the ambient
+  # SUPABASE_ACCESS_TOKEN CI value.
+  secretEnv:
+    SUPABASE_ACCESS_TOKEN: "secret://doc-search/doc-search/{{ .environment }}/SUPABASE_ACCESS_TOKEN"
+    # The runner's DB identity (de-AWS — replaces the Secrets Manager read).
+    SUPABASE_PROJECT_REF: "secret://doc-search/doc-search/{{ .environment }}/SUPABASE_PROJECT_REF"
+    SUPABASE_DB_PASSWORD: "secret://doc-search/doc-search/{{ .environment }}/SUPABASE_DB_PASSWORD"
+    SUPABASE_DB_URL: "secret://doc-search/doc-search/{{ .environment }}/SUPABASE_DB_URL"
+
+  subscribe:
+    environments:
+      - name: stage
+        profile: plan
+        profileRules:
+          - profile: apply
+            when:
+              triggerRef: github-push-main
+
+      - name: prod
+        profile: plan
+        profileRules:
+          - profile: apply
+            when:
+              triggerRef: github-push-main

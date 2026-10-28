@@ -1,0 +1,34 @@
+apiVersion: sourceplane.io/v1
+kind: Component
+metadata:
+  name: db
+  description: The database migrations and their runner (built by the db-migrate component before it plans or applies)
+spec:
+  type: turbo-package
+  lifecycle: production
+  owner: platform
+  # Its pages, attached to it in the workspace's catalog: what the Docs
+  # library shows for it, and what the catalog's docs and runbook checks read.
+  # Generated from what this manifest and its sources declare.
+  docs:
+    overview: docs/overview.md
+    pages:
+      - { path: docs/architecture.md, role: architecture, title: Architecture }
+      - { path: docs/runbook.md, role: runbook, title: Runbook }
+  domain: data
+  subscribe:
+    environments:
+      - name: dev
+        profile: quick-check
+      - name: stage
+        profile: quick-check
+      - name: prod
+        profile: quick-check
+  parameters:
+    nodeVersion: "22"
+    pnpmVersion: "10.12.1"
+    buildCommand: pnpm exec turbo run build --filter=./
+    typecheckCommand: pnpm exec turbo run typecheck --filter=./
+  labels:
+    team: platform
+    layer: data
