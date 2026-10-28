@@ -14,6 +14,12 @@
 # OPENAI_API_KEY=
 # OPENAI_MODEL=gpt-3.5-turbo
 #
+# The bearer `POST /api/embeddings?refresh=1` (re-embed every page) needs.
+# Unset, refresh answers 403; the plain POST, which embeds only changed
+# pages, needs nothing. In stage/prod it is the Orun secret REINDEX_TOKEN,
+# which the deploy hands to the Worker (README, "Re-embedding every page").
+# REINDEX_TOKEN=
+#
 # How similar a section must be to the question to reach the answer, as
 # cosine similarity (lib/search.ts, default 0.6).
 # MATCH_THRESHOLD=0.6

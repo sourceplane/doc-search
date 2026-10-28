@@ -105,7 +105,8 @@ Caveats that matter:
   `nods_page_section.embedding` is `vector(768)` because
   `@cf/baai/bge-base-en-v1.5` is 768-dimensional. Changing the model means a
   new migration that resizes the column and the function, AND re-indexing
-  every page (`POST /api/embeddings?refresh=1`): vectors from two models
+  every page (`POST /api/embeddings?refresh=1` with the environment's
+  `REINDEX_TOKEN` as a bearer — README, "Re-embedding every page"): vectors from two models
   share no space, even at the same size. Changing the ANSWER model is a
   one-line change in `lib/ai/models.ts`, with no migration.
 - **How strict the search is** is `MATCH_THRESHOLD` (cosine similarity,
@@ -186,10 +187,10 @@ orun integrations list --org <ws> --json && orun cloud check --org <ws>
 | deploy a change | merge to `main`; watch the run; failed lanes → `gh run rerun --failed` |
 | deploy by hand | Orunbase's Deploy button, or `gh workflow run ci.yml --ref main -f environment=<env> [-f component=<a,b>]` — the named components (blank: every one) run in that environment as a merge runs them; started off `main` it is refused |
 | change the docs | edit `apps/web/pages/docs/**/*.mdx`, `pnpm --filter @app/web docs:index`, commit both, merge — the deploy embeds the pages that changed |
-| index now | `curl -X POST https://doc-search-web-<env>.…workers.dev/api/embeddings` (idempotent: unchanged pages embed nothing; `?refresh=1` embeds every page again) |
+| index now | `curl -X POST https://doc-search-web-<env>.…workers.dev/api/embeddings` (open and idempotent: unchanged pages embed nothing). `?refresh=1` embeds every page again and needs `-H "Authorization: Bearer $REINDEX_TOKEN"`, the environment's Orun secret (README, "Re-embedding every page"); without it, 403 |
 | change the schema | a new `packages/db/src/migrations/<nnn>_<name>/up.sql` and its manifest entry (`pnpm --filter @saas/db run manifest:fix` for its checksum), merge — db-migrate applies it before the app deploys. Keep row-level security on every table in `public` |
 | change the answer model | `WORKERS_AI_CHAT_MODEL` in `apps/web/lib/ai/models.ts` |
-| change the embedding model | a new migration resizing `nods_page_section.embedding` and `match_page_sections()`, `WORKERS_AI_EMBEDDING_MODEL` and `EMBEDDING_DIMENSIONS` in `lib/ai/models.ts`, then `POST /api/embeddings?refresh=1` per environment |
+| change the embedding model | a new migration resizing `nods_page_section.embedding` and `match_page_sections()`, `WORKERS_AI_EMBEDDING_MODEL` and `EMBEDDING_DIMENSIONS` in `lib/ai/models.ts`, then `POST /api/embeddings?refresh=1` with the bearer, per environment |
 | tune the search | `wrangler secret put MATCH_THRESHOLD --name doc-search-web-<env>` (cosine similarity; default 0.6) |
 | redeploy without a change | edit the last line of the component's `component.yaml` (`# orun: redeploy <reason> <stamp>`) and merge — it is a deploy trigger, nothing reads it |
 | use OpenAI for the answers | above |

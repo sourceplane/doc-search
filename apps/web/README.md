@@ -19,7 +19,9 @@ Vercel lists it at https://vercel.com/templates/next.js/nextjs-openai-doc-search
   `lib/docs/index.generated.json`, with upstream's MDX processing in
   `lib/docs/process-mdx.ts`); the deploy's smoke step POSTs here, and the
   Worker embeds every page whose checksum the database does not hold
-  (`lib/docs/sync.ts`).
+  (`lib/docs/sync.ts`). `?refresh=1` re-embeds every page and needs the
+  environment's `REINDEX_TOKEN` as a bearer (`lib/reindex.ts`); unset, it
+  answers 403.
 - `/api/health`: 200 only when the database is reachable through Hyperdrive
   and migrated; it says how much of the docs is indexed and calls no model.
 

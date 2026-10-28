@@ -26,3 +26,7 @@ Resolved at deploy time from secrets the infrastructure lanes publish (names onl
 
 - `WIRING_CLOUDFLARE_HYPERDRIVE_PROD`
 - `WIRING_CLOUDFLARE_HYPERDRIVE_STAGE`
+
+## Secrets resolved by the lane (names only)
+
+- `REINDEX_TOKEN` (optional)

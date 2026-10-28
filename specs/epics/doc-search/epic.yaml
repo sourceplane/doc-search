@@ -28,4 +28,5 @@ spec:
         - "blueprint.yaml (the console card) and repo-blueprint.yaml (the build) take a new product from nothing to live on stage and prod in one landing, its docs indexed by the deploy's smoke, then record it"
         - "a product built from it carries the product only, renamed throughout to its own name, repository, Worker, Supabase project and Hyperdrive config"
         - "Baseline CI is green: contract tests, generated component docs, the blueprint read by the pinned orun, the leak gate, the offline bootstrap and the end-to-end tier"
-      tasks: [DQ-3]
+        - "re-embedding every page (POST /api/embeddings?refresh=1) needs the environment's REINDEX_TOKEN as a bearer, refused with a 403 otherwise; the plain POST stays open"
+      tasks: [DQ-3, DQ-4]

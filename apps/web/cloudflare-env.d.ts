@@ -10,6 +10,9 @@ interface CloudflareEnv {
   ASSETS: Fetcher;
   // Optional Worker secret (lib/ai/models.ts): upstream's OpenAI answer model.
   OPENAI_API_KEY?: string;
+  // Optional Worker secret (lib/reindex.ts): the bearer POST
+  // /api/embeddings?refresh=1 needs. Unset, refresh is off.
+  REINDEX_TOKEN?: string;
   // Optional Worker vars: which OpenAI chat model (default upstream's), and
   // how similar a section must be to reach the answer (lib/search.ts).
   OPENAI_MODEL?: string;

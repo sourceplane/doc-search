@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { startPostgres, type TestPostgres } from "./support/postgres";
 import { fakeAi } from "./support/workers-ai";
+import { REFRESH_DISABLED, REFRESH_NEEDS_BEARER, sameSecret } from "@/lib/reindex";
 
 // The three route handlers, called as OpenNext calls them, over a real
 // Postgres (PGlite with pgvector, every migration applied) reached through
@@ -18,12 +19,14 @@ let pg: TestPostgres;
 let ai: ReturnType<typeof fakeAi>;
 const env: Record<string, unknown> = {};
 
-const post = (url: string, body?: unknown) =>
+const post = (url: string, body?: unknown, headers: Record<string, string> = {}) =>
   new Request(url, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...headers },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
+const TOKEN = "offline-reindex-token-fixture";
+const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
 
 beforeAll(async () => {
   // The app is the socket's only client (PGlite serves one session at a
@@ -87,11 +90,65 @@ describe("POST /api/embeddings", () => {
     expect(await (await GET()).json()).toMatchObject({ pages: 1, sections: 2 });
   });
 
-  it("re-embeds everything with ?refresh=1", async () => {
+  it("re-embeds everything with ?refresh=1 and the environment's REINDEX_TOKEN as a bearer", async () => {
+    env.REINDEX_TOKEN = TOKEN;
     const { POST } = await import("@/app/api/embeddings/route");
     await POST(post("https://x.test/api/embeddings"));
-    const res = await POST(post("https://x.test/api/embeddings?refresh=1"));
-    expect(await res.json()).toMatchObject({ embedded: ["/docs/openai_embeddings"] });
+    ai.run.mockClear();
+    const res = await POST(post("https://x.test/api/embeddings?refresh=1", undefined, bearer(TOKEN)));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      ok: true, pages: 1, embedded: ["/docs/openai_embeddings"], unchanged: [], failed: [],
+    });
+    expect(ai.run).toHaveBeenCalledTimes(1);
+  });
+
+  describe("?refresh=1 is refused with a 403, reaching neither the model nor the database", () => {
+    const refused = async (headers: Record<string, string>, error: string) => {
+      const { POST } = await import("@/app/api/embeddings/route");
+      await POST(post("https://x.test/api/embeddings"));
+      const before = await pg.db.query<{ n: number }>("select count(*)::int as n from nods_page_section");
+      ai.run.mockClear();
+      const res = await POST(post("https://x.test/api/embeddings?refresh=1", undefined, headers));
+      expect(res.status).toBe(403);
+      expect(res.headers.get("cache-control")).toBe("no-store");
+      expect(await res.json()).toEqual({ ok: false, error });
+      expect(ai.run).not.toHaveBeenCalled();
+      const after = await pg.db.query<{ n: number }>("select count(*)::int as n from nods_page_section");
+      expect(after.rows).toEqual(before.rows);
+    };
+
+    it("when the environment has no REINDEX_TOKEN, whatever the bearer", async () => {
+      await refused({}, REFRESH_DISABLED);
+      await refused(bearer(TOKEN), REFRESH_DISABLED);
+    });
+    it("without a bearer", async () => {
+      env.REINDEX_TOKEN = TOKEN;
+      await refused({}, REFRESH_NEEDS_BEARER);
+      await refused({ authorization: TOKEN }, REFRESH_NEEDS_BEARER);
+    });
+    it("with a wrong bearer, a prefix of the right one included", async () => {
+      env.REINDEX_TOKEN = TOKEN;
+      await refused(bearer("wrong"), REFRESH_NEEDS_BEARER);
+      await refused(bearer(TOKEN.slice(0, -1)), REFRESH_NEEDS_BEARER);
+      await refused(bearer(`${TOKEN}x`), REFRESH_NEEDS_BEARER);
+    });
+  });
+
+  it("compares the bearer as a whole, in time that depends on neither secret", async () => {
+    expect(await sameSecret(TOKEN, TOKEN)).toBe(true);
+    expect(await sameSecret(TOKEN, TOKEN.toUpperCase())).toBe(false);
+    expect(await sameSecret("", TOKEN)).toBe(false);
+    expect(await sameSecret(TOKEN.slice(0, 8), TOKEN)).toBe(false);
+  });
+
+  it("leaves the plain POST open: a bearer, right or wrong, changes nothing", async () => {
+    env.REINDEX_TOKEN = TOKEN;
+    const { POST } = await import("@/app/api/embeddings/route");
+    const first = await POST(post("https://x.test/api/embeddings", undefined, bearer("wrong")));
+    expect(await first.json()).toMatchObject({ ok: true, embedded: ["/docs/openai_embeddings"] });
+    const second = await POST(post("https://x.test/api/embeddings", undefined, bearer(TOKEN)));
+    expect(await second.json()).toMatchObject({ ok: true, embedded: [], unchanged: ["/docs/openai_embeddings"] });
   });
 
   it("is a 503 without the AI binding, embedding nothing", async () => {

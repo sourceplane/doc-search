@@ -10,7 +10,7 @@ product in one landing.**
 
 | | |
 |---|---|
-| Status | ✅ Shipped (`baseline-v1`) — proven offline in Baseline CI; live bootstrap pending (risks DQ-A, DQ-B) |
+| Status | ✅ Shipped (`baseline-v2`) — proven offline in Baseline CI; live bootstrap pending (risks DQ-A, DQ-B) |
 | Upstream | [supabase-community/nextjs-openai-doc-search](https://github.com/supabase-community/nextjs-openai-doc-search) (Apache-2.0), Vercel's [Next.js OpenAI Doc Search Starter](https://vercel.com/templates/next.js/nextjs-openai-doc-search-starter), at `50d6bb7` |
 | Reference | [rag-chatbot](https://github.com/sourceplane/rag-chatbot) — an AI SDK app on Workers AI and Supabase pgvector through Hyperdrive, the 768-dimension migration, db-migrate, the e2e's Workers AI stand-in |
 | Key | `DQ` |
@@ -32,4 +32,4 @@ product in one landing.**
 |---|---|---|
 | DQ0 — the spec | the repository, its intent, CI, tooling and spec index; this doc set | DQ-1 |
 | DQ1 — the doc search on Workers and Supabase | the template in `apps/web`, the models on Workers AI, the docs index and the Worker's indexing, the migrations, the Supabase and Hyperdrive roots, the tests | DQ-2 |
-| DQ2 — a baseline | the console card, the build document, the context pack and the baseline's tests | DQ-3 |
+| DQ2 — a baseline | the console card, the build document, the context pack and the baseline's tests; the re-embed of every page behind a bearer | DQ-3, DQ-4 |

@@ -3,6 +3,7 @@ import type { DocsIndex } from '@/lib/docs/index-types'
 import { syncDocs } from '@/lib/docs/sync'
 import { DatabaseNotConfiguredError, getSql } from '@/lib/db'
 import { AiNotConfiguredError, embeddingModel } from '@/lib/ai/models'
+import { refreshRefusal } from '@/lib/reindex'
 
 // Not upstream's route — upstream's step, moved. Upstream embedded the docs
 // at `pnpm build` (`pnpm run embeddings`), with OpenAI's key and Supabase's
@@ -18,11 +19,23 @@ import { AiNotConfiguredError, embeddingModel } from '@/lib/ai/models'
 // and only the pages whose checksum the database does not already hold, so
 // calling it again — by the next deploy, a retry, or anybody — does one SELECT
 // per page and embeds nothing. `?refresh=1` is upstream's `--refresh`: embed
-// every page again, which only a change of embedding model calls for.
+// every page again, which only a change of embedding model calls for. That
+// one costs Workers AI on every call, so it needs the environment's
+// REINDEX_TOKEN as a bearer (lib/reindex.ts) — refused with a 403, before the
+// database or the model is reached, when it is missing, wrong, or unset.
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: Request) {
   const refresh = new URL(req.url).searchParams.get('refresh') === '1'
+  if (refresh) {
+    const refusal = await refreshRefusal(req)
+    if (refusal) {
+      return Response.json(
+        { ok: false, error: refusal },
+        { status: 403, headers: { 'cache-control': 'no-store' } }
+      )
+    }
+  }
   let sql: Awaited<ReturnType<typeof getSql>> | undefined
   try {
     sql = await getSql()

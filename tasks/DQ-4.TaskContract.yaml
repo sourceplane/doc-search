@@ -1,0 +1,25 @@
+apiVersion: orun.io/v1
+kind: TaskContract
+metadata:
+  name: DQ-4
+  title: "Re-embedding every page needs a bearer"
+spec:
+  goal: POST /api/embeddings?refresh=1, which re-embeds every page billed to the owner's Workers AI, answers only a request carrying the environment's REINDEX_TOKEN as a bearer; the plain POST the deploy's smoke calls stays open
+  affects:
+    - apps/web
+    - tooling/wire
+    - tests/web
+    - testing
+    - hooks
+    - .baseline/product/README.md
+    - ai/context
+    - BOOTSTRAP.md
+    - specs/epics/doc-search
+    - specs/epics/README.md
+    - tasks
+  doneWhen:
+    - with no REINDEX_TOKEN, refresh=1 answers 403 and embeds nothing; a missing or wrong bearer answers 403, compared in constant time; the right bearer re-embeds every page
+    - REINDEX_TOKEN is an optional Orun secret the build never sees and the deploy hands to the Worker as a Worker secret
+    - tests/web and the end-to-end tier assert all three, and every existing check still holds
+    - Baseline CI is green on main, tagged baseline-v2
+  gates: []

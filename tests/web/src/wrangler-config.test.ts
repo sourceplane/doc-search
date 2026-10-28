@@ -60,6 +60,8 @@ describe("apps/web wrangler config", () => {
     ]);
     const vars = (config.vars ?? {}) as Record<string, unknown>;
     expect(Object.keys(vars)).not.toContain("OPENAI_API_KEY");
+    // A secret, never a var a deploy would publish in the dashboard.
+    expect(Object.keys(vars)).not.toContain("REINDEX_TOKEN");
   });
 
   it("renders a deploy lane its own environment from the live wiring document", () => {
