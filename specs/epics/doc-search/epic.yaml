@@ -1,0 +1,31 @@
+# The epic's declaration. metadata.name equals the directory name; metadata.key
+# is the task-key prefix this epic reserves (DQ → DQ-1, DQ-2, …). Owner, target
+# date and health are the platform's — never written here.
+apiVersion: orun.io/v1
+kind: Epic
+metadata:
+  name: doc-search
+  key: DQ
+spec:
+  title: "Supabase's Next.js OpenAI Doc Search on Cloudflare Workers"
+  summary: "Supabase's Next.js OpenAI Doc Search Starter — a ⌘K dialog that answers a question about a site's MDX docs from the sections closest to it — run on Cloudflare Workers + Static Assets through @opennextjs/cloudflare, the docs embedded and the answer written by Workers AI through the Worker's AI binding (OpenAI for the answer optional), its Postgres a Supabase project with pgvector reached through Hyperdrive, both provisioned by Terraform; the schema applied by db-migrate, the docs indexed by the deployed Worker on every deploy, never by a build holding a credential; and become an Orun baseline that takes a new product from nothing to live on stage and prod in one landing."
+  state: started
+  milestones:
+    - name: "DQ0 — the spec"
+      exitCriteria:
+        - "the repository is born with its intent, CI, tooling and spec index, and this doc set and the task contracts are on main"
+      tasks: [DQ-1]
+    - name: "DQ1 — the doc search on Workers and Supabase"
+      exitCriteria:
+        - "apps/web is the template on Next.js 16.3.8, the page on the Pages Router, the search and the indexing App Router route handlers, built by OpenNext into one Worker"
+        - "the embeddings are Workers AI's bge-base-en-v1.5 at 768 dimensions and the answer Llama 4 Scout, streamed, through the AI binding; OPENAI_API_KEY switches only the answer to OpenAI, straight from OpenAI, with upstream's moderation — never a gateway"
+        - "the build splits the docs into a committed index with no credential; the Worker's POST /api/embeddings embeds every page whose checksum the database does not hold, one transaction per page under an advisory lock"
+        - "an empty index answers 200 and says so; upstream's schema, the 768-dimension cosine resize and the Data API's revoke are packages/db migrations applied by db-migrate; the Supabase and Hyperdrive roots provision stage and prod"
+        - "`pnpm typecheck`, `pnpm lint`, `pnpm test` and `pnpm build` are green"
+      tasks: [DQ-2]
+    - name: "DQ2 — a baseline"
+      exitCriteria:
+        - "blueprint.yaml (the console card) and repo-blueprint.yaml (the build) take a new product from nothing to live on stage and prod in one landing, its docs indexed by the deploy's smoke, then record it"
+        - "a product built from it carries the product only, renamed throughout to its own name, repository, Worker, Supabase project and Hyperdrive config"
+        - "Baseline CI is green: contract tests, generated component docs, the blueprint read by the pinned orun, the leak gate, the offline bootstrap and the end-to-end tier"
+      tasks: [DQ-3]

@@ -1,0 +1,24 @@
+apiVersion: orun.io/v1
+kind: TaskContract
+metadata:
+  name: DQ-2
+  title: "The doc search on Workers and Supabase"
+spec:
+  goal: Supabase's Next.js OpenAI Doc Search runs as one Cloudflare Worker, its docs embedded and its answers written by Workers AI, the vectors in a Supabase project's pgvector behind Hyperdrive, the docs indexed by the deployed Worker and the schema applied by db-migrate
+  affects:
+    - apps/web
+    - packages/db
+    - infra/terraform/supabase
+    - infra/terraform/cloudflare-hyperdrive
+    - infra/db-migrate
+    - tests/web
+    - tests/db
+    - pnpm-workspace.yaml
+    - pnpm-lock.yaml
+  doneWhen:
+    - the template's page and search dialog run on OpenNext, the search an App Router route handler streaming plain text, the database reached through the HYPERDRIVE binding with a client per call
+    - the embeddings are Workers AI's bge-base-en-v1.5 at 768 dimensions and the answer Llama 4 Scout through the AI binding; OPENAI_API_KEY switches only the answer to OpenAI with upstream's moderation; no gateway
+    - the build writes the docs index with no credential, and POST /api/embeddings embeds only the pages whose checksum changed, one transaction per page under an advisory lock
+    - an empty index answers 200 and says so; upstream's migration, the 768-dimension cosine resize and the Data API's revoke are packages/db migrations
+    - pnpm typecheck, lint, test and build are green
+  gates: []
