@@ -1,0 +1,182 @@
+apiVersion: sourceplane.io/v1
+kind: Intent
+
+metadata:
+  name: doc-search
+  description: Vercel's Next.js OpenAI Doc Search Starter (Next.js, pgvector doc search) on Cloudflare Workers + Static Assets with Workers AI, Supabase Postgres through Hyperdrive and the schema managed by Orun, on the Lumen baseline conventions
+  namespace: sourceplane
+
+execution:
+  state:
+    backendUrl: https://api-edge-prod.oruncloud.workers.dev
+    # Declared, enforced tenancy: the workspace claim is sent on every remote op
+    # (including the credential-free CI OIDC exchange) so the platform can
+    # enforce claim ⊆ authorized. Declaring it implies strict mode — a
+    # non-interactive run that resolves no workspace fails fast.
+    #
+    # `ws_CHANGE_ME` is the one value `ci.yml` treats as "not linked yet" and
+    # plans nothing for. A bootstrap writes the product's workspace here; by
+    # hand, set it to yours (`orun cloud link`) and the Orun pipeline runs.
+    workspace: ws_CHANGE_ME
+    requireOrg: true
+    # Push the resolved catalog after a successful plan on the default branch,
+    # keeping the workspace-global catalog head fresh without an explicit
+    # `--push-catalog`.
+    autopushCatalog: true
+  # Lanes (orun ≥ v2.76.0): CI runs one GitHub job per LANE, not per orun job.
+  lanes:
+    mode: auto
+    maxLanes: 6
+    concurrency: 6
+
+compositions:
+  sources:
+    # The composition stack lives in sourceplane/stack-tectonic and is consumed
+    # as a published OCI artifact rather than a repo-local directory. Pin an
+    # explicit version: a bare repository reference resolves to `:latest`,
+    # which would let a catalog release change this repo's execution contracts
+    # without a commit here. Bumping the tag is the deliberate upgrade step.
+    #
+    # 0.19.0, NOT 0.20.0. 0.20.0 makes the workspace install lane-scoped: it
+    # runs once in the source checkout and every job's staged tree LINKS its
+    # top-level node_modules there — out of the tree. Next 16 builds with
+    # Turbopack, which refuses a dependency that resolves outside its root
+    # ("Symlink apps/web/node_modules/next is invalid, it points out of the
+    # filesystem root"). Under 0.19.0 the job installs inside its own tree, and
+    # the app has one job per lane (`lane: isolated`), so a shared install
+    # would save nothing anyway. 0.19.0 is also the release whose first deploy
+    # retries Cloudflare's 10007 race and whose smoke retries with backoff.
+    - name: stack-tectonic
+      kind: oci
+      ref: oci://ghcr.io/sourceplane/stack-tectonic:0.19.0
+  resolution:
+    precedence:
+      - stack-tectonic
+    bindings:
+      terraform: stack-tectonic
+      cloudflare-domain: stack-tectonic
+      db-migrate: stack-tectonic
+
+discovery:
+  roots:
+    - apps/
+    - infra/
+    - packages/
+    - tests/
+
+# Where the work lives (initiative-lifecycle): an epic is a directory with an
+# epic.yaml under `epics`, a task a contract under `tasks`; the `orun plan` on
+# main reconciles the tree into the workspace's work plane after a merge.
+#
+# THIS BLOCK IS THIS REPOSITORY'S OWN. A product bootstrapped from it has no
+# work tree of its own (its bootstrap work lives on the platform), so the
+# bootstrap removes the block, and this comment with it, from the product's
+# copy before the first landing.
+work:
+  epics: specs/epics
+  tasks: tasks
+  sync: on-merge
+
+automation:
+  triggerBindings:
+    github-pull-request:
+      description: Pull request validation
+      on:
+        provider: github
+        event: pull_request
+        actions:
+          - opened
+          - synchronize
+          - reopened
+          - ready_for_review
+        baseBranches:
+          - main
+      plan:
+        scope: changed
+        base: pull_request.base.sha
+        head: pull_request.head.sha
+
+    github-push-main:
+      description: Main branch stack convergence after merge
+      on:
+        provider: github
+        event: push
+        branches:
+          - main
+
+    local-development:
+      description: Local testing with full Terraform execution
+      on:
+        provider: local
+
+environments:
+  dev:
+    description: Verify-only. Pull requests plan and verify here; nothing is deployed.
+    activation:
+      triggerRefs:
+        - github-pull-request
+        - github-push-main
+        - local-development
+    dependencyMode: advisory
+    parameterDefaults:
+      terraform:
+        lane: verify
+        namespace: sourceplane
+        namespacePrefix: dev-
+        owner: sourceplane
+        repo: doc-search
+    policies:
+      requireApproval: "false"
+    env:
+      BASE_DOMAIN: doc-search.example.com
+
+  stage:
+    description: Deployed on every merge to main, before prod.
+    url: https://doc-search-web-stage.your-workers-subdomain.workers.dev
+    activation:
+      triggerRefs:
+        - github-pull-request
+        - github-push-main
+    parameterDefaults:
+      terraform:
+        lane: verify
+        namespace: sourceplane
+        namespacePrefix: stg-
+        owner: sourceplane
+        repo: doc-search
+    policies:
+      requireApproval: "false"
+    env:
+      BASE_DOMAIN: doc-search.example.com
+
+  prod:
+    description: Where visitors are. Deploys after stage converges on the same commit.
+    url: https://doc-search-web-prod.your-workers-subdomain.workers.dev
+    activation:
+      triggerRefs:
+        - github-pull-request
+        - github-push-main
+    promotion:
+      dependsOn:
+        - environment: stage
+    parameterDefaults:
+      terraform:
+        lane: verify
+        namespace: sourceplane
+        namespacePrefix: prod-
+        owner: sourceplane
+        repo: doc-search
+    policies:
+      requireApproval: "false"
+    env:
+      BASE_DOMAIN: doc-search.example.com
+
+# Repo-level catalog entity: front page + role-tagged docs (rendered in the
+# workspace Docs library, pinned to the commit by `orun plan`).
+repo:
+  displayName: doc-search
+  docs:
+    overview: README.md
+    pages:
+      - { path: ai/context/operations.md, role: runbook, title: Operating contract }
+      - { path: ai/context/deployment.md, role: reference, title: Live deployment manifest }
