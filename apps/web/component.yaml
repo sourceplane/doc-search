@@ -55,6 +55,16 @@ spec:
   secretEnv:
     WIRING_CLOUDFLARE_HYPERDRIVE_STAGE: "secret://doc-search/doc-search/stage/WIRING_CLOUDFLARE_HYPERDRIVE"
     WIRING_CLOUDFLARE_HYPERDRIVE_PROD: "secret://doc-search/doc-search/prod/WIRING_CLOUDFLARE_HYPERDRIVE"
+  # REINDEX_TOKEN: the bearer `POST /api/embeddings?refresh=1` (re-embed every
+  # page) needs (lib/reindex.ts). The owner stores it as an Orun secret per
+  # environment (README → Re-embedding every page); the build runs without it
+  # and then hands it to the Worker as a SECRET (buildCommand below).
+  # BEST-EFFORT, wire-now-seed-later: a key nobody has stored is skipped when
+  # the job resolves its secrets (no env var, no failure), and the Worker
+  # without it refuses refresh — so a fresh product deploys and indexes
+  # before anyone has chosen a token.
+  optionalSecretEnv:
+    REINDEX_TOKEN: "secret://doc-search/doc-search/{{ .environment }}/REINDEX_TOKEN"
   subscribe:
     environments:
       - name: dev
@@ -104,7 +114,14 @@ spec:
     # No public origin is baked in: the page renders no absolute URL (no Open
     # Graph image, no canonical link), and every request it makes is to its
     # own origin. ${ORUN_ENVIRONMENT} the runner sets for every step.
-    buildCommand: if [ "${ORUN_ENVIRONMENT}" != dev ]; then node ../../tooling/wire/live.mjs --template wrangler.template.jsonc --out wrangler.jsonc --components cloudflare-hyperdrive --env "${ORUN_ENVIRONMENT}"; fi && pnpm exec turbo run build --filter=@app/web
+    #
+    # REINDEX_TOKEN never reaches the build (`env -u`), so neither a bundle
+    # nor the bundler's cache holds it. Then, if the environment has one, it
+    # goes to the Worker as a SECRET (tooling/wire/worker-secrets.mjs:
+    # `wrangler secret bulk`, the value over stdin) before the composition
+    # deploys it. Only the deploy lane holds a Cloudflare credential, so a
+    # verify lane builds the same and pushes nothing.
+    buildCommand: if [ "${ORUN_ENVIRONMENT}" != dev ]; then node ../../tooling/wire/live.mjs --template wrangler.template.jsonc --out wrangler.jsonc --components cloudflare-hyperdrive --env "${ORUN_ENVIRONMENT}"; fi && env -u REINDEX_TOKEN pnpm exec turbo run build --filter=@app/web && node ../../tooling/wire/worker-secrets.mjs --secret REINDEX_TOKEN --worker "doc-search-web-${ORUN_ENVIRONMENT}" --config wrangler.jsonc
 
     # Smoke — and the docs' indexing, which is the step upstream ran at build
     # time (`pnpm run embeddings`). After `wrangler deploy`:

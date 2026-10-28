@@ -352,10 +352,21 @@ for comp in tree.glob("infra/**/component.yaml"):
     so = str(((yaml.safe_load(comp.read_text()) or {}).get("spec") or {}).get("parameters", {}).get("secretOutputs") or "")
     published |= {pair.split("=", 1)[0] for pair in so.split(",") if "=" in pair}
 resolved = set()
+# The one key an OWNER stores, neither minted nor published: REINDEX_TOKEN,
+# the bearer refresh=1 needs. Only web resolves it, this environment's, and
+# BEST-EFFORT — a key nobody has stored is skipped, so the product deploys.
+owner_keys = {"REINDEX_TOKEN"}
 for (comp, env), j in jobs.items():
     for r in j.get("secretRefs") or []:
         ref = r["ref"]
-        resolved.add(ref.rsplit("/", 1)[1])
+        key = ref.rsplit("/", 1)[1]
+        if key in owner_keys:
+            if comp != "web" or ref != f"secret://{ws}/{repo}/{env}/{key}" or r.get("optional") is not True:
+                bad(f"{comp}@{env} resolves {key} as {r} — want web's optional secret://{ws}/{repo}/{env}/{key}")
+            continue
+        if r.get("optional"):
+            bad(f"{comp}@{env} resolves {r['asEnv']} as optional; only {sorted(owner_keys)} may be")
+        resolved.add(key)
         if not ref.startswith(f"secret://{ws}/"):
             bad(f"{comp}@{env} resolves {r['asEnv']} from {ref} — not the product's workspace")
         if f"/{repo}/" not in ref and f"project:{repo}/" not in ref:
@@ -387,6 +398,11 @@ for env in ("stage", "prod"):
         bad(f"web@{env}'s smoke does not check the product's own /api/health")
     if "-X POST" not in steps.get("smoke", "") or "/api/embeddings" not in steps.get("smoke", ""):
         bad(f"web@{env}'s smoke does not index the docs (POST /api/embeddings)")
+    if not any(r["asEnv"] == "REINDEX_TOKEN" and r.get("optional") is True for r in j.get("secretRefs") or []):
+        bad(f"web@{env} does not resolve the owner's REINDEX_TOKEN (optional)")
+    if "env -u REINDEX_TOKEN" not in steps.get("build-app", "") \
+            or f'worker-secrets.mjs --secret REINDEX_TOKEN --worker "{repo}-web-${{ORUN_ENVIRONMENT}}"' not in steps.get("build-app", ""):
+        bad(f"web@{env}'s build does not keep REINDEX_TOKEN out of the bundle and hand it to its own Worker")
 
 if problems:
     for p in problems:

@@ -192,7 +192,45 @@ The embeddings stay on Workers AI (`@cf/baai/bge-base-en-v1.5`) either way:
 the index's column is sized to that model's 768 dimensions, and a question
 embedded by one model cannot be compared with docs embedded by another.
 Changing the embedding model is a migration plus re-indexing every page
-(`POST /api/embeddings?refresh=1`); `ai/context/operations.md` says how.
+(`POST /api/embeddings?refresh=1`, below); `ai/context/operations.md` says
+how.
+
+## Re-embedding every page
+
+`POST /api/embeddings` — what every deploy's smoke calls — needs nothing:
+it embeds only the pages whose checksum the database does not hold, so a
+call with unchanged docs embeds nothing, and two at once embed a page once.
+Its `?refresh=1` (upstream's `--refresh`) embeds EVERY page again, billed
+to your Workers AI, so it needs a bearer: the environment's
+`REINDEX_TOKEN`. Without one stored, refresh answers 403 and embeds
+nothing — which is how a new product starts.
+
+1. **Store a token**, once per environment, as this repository's Orun
+   secret (stage and prod can each hold their own):
+
+   ```bash
+   openssl rand -hex 32                          # a token; keep it
+   orun secrets set REINDEX_TOKEN --env stage    # prompts for the value
+   orun secrets set REINDEX_TOKEN --env prod
+   ```
+
+   The build never sees it: the deploy hands it to the Worker as a Worker
+   secret (`wrangler secret bulk`), so it is in no bundle and no log.
+2. **Redeploy the app** (storing a secret deploys nothing): Orunbase's
+   Deploy button, or `gh workflow run ci.yml --ref main -f environment=<env>
+   -f component=web`.
+3. **Refresh**:
+
+   ```bash
+   curl -X POST -H "Authorization: Bearer <token>" \
+     https://doc-search-web-<env>.<your-subdomain>.workers.dev/api/embeddings?refresh=1
+   ```
+
+   A missing or wrong bearer gets 403 and embeds nothing.
+
+To turn refresh off again, delete the Orun secret and the Worker secret
+(`pnpm exec wrangler secret delete REINDEX_TOKEN --name doc-search-web-<env>`
+from `apps/web`): a deploy pushes the secrets that exist and deletes none.
 
 ## Tuning the search
 

@@ -53,6 +53,8 @@
 #      question sharing nothing with the docs answered upstream's "Sorry, I
 #      don't know how to help with that."; an empty index answered with a
 #      message, not a failure; a request without a question refused (400);
+#      `?refresh=1` refused (403, nothing embedded) without its bearer and
+#      with a wrong one, and re-embedding every page with the right one;
 #   6. the Data API's view of the same database: both tables have row-level
 #      security, and `anon` and `authenticated` — granted everything Supabase
 #      grants them — read none of the rows the indexing wrote, write none and
@@ -314,14 +316,17 @@ printf '{ "name": "fake-workers-ai", "main": "index.js", "compatibility_date": "
 # stand-in's space (a bag of words, where a question and the section it
 # matches share a handful of words out of hundreds — far below what two
 # texts about the same thing score in bge-base-en-v1.5's). It is the Worker
-# var an owner sets the same way (lib/search.ts). Everything else — the
-# Hyperdrive binding, the assets, the flags — is the built config, under the
-# Worker name the stage deploy gives it. Written beside it, in the throwaway
-# tree.
-python3 - "$work/apps/web/wrangler.jsonc" "$work/apps/web/wrangler.e2e.json" "$repo-web-stage" <<'PY' \
+# var an owner sets the same way (lib/search.ts). REINDEX_TOKEN, the bearer
+# `?refresh=1` needs, is set too — a fresh random one: the Worker reads a var
+# and a secret alike from its env, and a deploy hands it the Orun secret.
+# Everything else — the Hyperdrive binding, the assets, the flags — is the
+# built config, under the Worker name the stage deploy gives it. Written
+# beside it, in the throwaway tree.
+reindex_token="e2e-$(python3 -c 'import secrets; print(secrets.token_hex(16))')"
+python3 - "$work/apps/web/wrangler.jsonc" "$work/apps/web/wrangler.e2e.json" "$repo-web-stage" "$reindex_token" <<'PY' \
   || { echo "FAIL: could not derive the dev config from the built one" >&2; exit 1; }
 import json, sys
-src, out, name = sys.argv[1:]
+src, out, name, reindex_token = sys.argv[1:]
 cfg = json.loads("\n".join(l for l in open(src).read().splitlines() if not l.lstrip().startswith("//")))
 if cfg.pop("ai", None) != {"binding": "AI"}:
     sys.exit("the built Worker's wrangler.jsonc does not bind Workers AI as AI")
@@ -330,7 +335,7 @@ if "vars" in cfg:
 cfg.pop("$schema", None)
 cfg["name"] = name
 cfg["services"] = [{"binding": "AI", "service": "fake-workers-ai"}]
-cfg["vars"] = {"MATCH_THRESHOLD": "0.05"}
+cfg["vars"] = {"MATCH_THRESHOLD": "0.05", "REINDEX_TOKEN": reindex_token}
 json.dump(cfg, open(out, "w"), indent=2)
 PY
 port="$(free_port)"
@@ -354,9 +359,10 @@ smoke="$(python3 -c "import yaml,sys;print(yaml.safe_load(open(sys.argv[1]))['sp
 DEPLOYED_URL="$url" bash -c "$smoke" || { echo "FAIL: the deploy's smoke refused the product" >&2; tail -20 "$scratch/dev.log" >&2; exit 1; }
 
 echo "   ▸ every route the product promises, the index as stored, and questions answered from it"
-python3 - "$url" "$values" "$pgurl" "$tree/apps/web/lib/docs/index.generated.json" <<'PY' || { echo "FAIL: the routes; wrangler dev said:" >&2; tail -40 "$scratch/dev.log" >&2; exit 1; }
+python3 - "$url" "$values" "$pgurl" "$tree/apps/web/lib/docs/index.generated.json" "$reindex_token" <<'PY' || { echo "FAIL: the routes; wrangler dev said:" >&2; tail -40 "$scratch/dev.log" >&2; exit 1; }
 import html, http.client, json, re, subprocess, sys, threading, time, urllib.error, urllib.request
 base, values, pgurl, index_file = sys.argv[1], json.load(open(sys.argv[2])), sys.argv[3], sys.argv[4]
+reindex_token = sys.argv[5]
 index = json.load(open(index_file))
 name, repo, org = values["productname"], values["reponame"], values["githuborg"]
 problems = []
@@ -480,6 +486,24 @@ s, again = index_docs()
 if s != 200 or again.get("embedded") != [page["path"]]:
     bad(f"re-indexing an emptied database answered {s} {again}")
 
+# ── ?refresh=1 re-embeds every page, so it needs the bearer ───────────────
+# Refused with a 403 and nothing embedded — the stand-in's call count below
+# says so — without a bearer, with a wrong one, and with the token as a bare
+# header; then the right bearer re-embeds the whole index. The plain POST
+# above took none of these and needed none.
+stored = sql("select string_agg(id::text || ':' || coalesce(checksum, ''), ',' order by id) from nods_page")
+for label, headers in (("no bearer", {}), ("a wrong bearer", {"authorization": "Bearer wrong-" + reindex_token}),
+                       ("the token without 'Bearer'", {"authorization": reindex_token})):
+    s, _, body = req("/api/embeddings?refresh=1", b"", headers, "POST")
+    if s != 403 or json.loads(body) != {"ok": False, "error": "refresh=1 needs Authorization: Bearer <REINDEX_TOKEN>"}:
+        bad(f"refresh=1 with {label} answered {s} {body}")
+if sql("select string_agg(id::text || ':' || coalesce(checksum, ''), ',' order by id) from nods_page") != stored:
+    bad("a refused refresh=1 changed the stored pages")
+s, _, body = req("/api/embeddings?refresh=1", b"", {"authorization": f"Bearer {reindex_token}"}, "POST")
+refreshed = json.loads(body) if s == 200 else {}
+if s != 200 or refreshed.get("embedded") != [page["path"]] or refreshed.get("unchanged") != []:
+    bad(f"refresh=1 with the right bearer answered {s} {body}")
+
 if problems:
     for p in problems:
         print(f"  ✕ {p}", file=sys.stderr)
@@ -487,7 +511,8 @@ if problems:
 print(f"   / as {name!r} linking github.com/{org}/{repo}, a 404, /api/health; the smoke indexed 1 page as "
       f"{len(page['sections'])} vector(768) sections; a second indexing embedded nothing, two at once embedded it "
       f"once; a question answered from the pgvector section, an unrelated one \"Sorry, I don't know how to help "
-      f"with that.\", a prompt-less request refused, an empty index said so")
+      f"with that.\", a prompt-less request refused, an empty index said so; refresh=1 refused without its "
+      f"bearer and with a wrong one, and re-embedding everything with it")
 PY
 
 # What the Workers AI stand-in was asked, read back from wrangler's output:
@@ -505,10 +530,12 @@ if refused:
 page_embeds = [c for c in embeds if len(c["texts"]) == 2]
 question_embeds = [c for c in embeds if len(c["texts"]) == 1]
 # The smoke's indexing, the one of the two concurrent indexings that
-# embedded, the re-indexing after the empty index: three, each the page's two
-# sections in one call. Then the two questions that reached the model.
-if len(page_embeds) != 3 or len(question_embeds) != 2 or len(embeds) != 5:
-    problems.append(f"{len(page_embeds)} page and {len(question_embeds)} question embeddings (of {len(embeds)}); want 3 and 2")
+# embedded, the re-indexing after the empty index, and the ONE refresh=1
+# that carried the right bearer (the three refused ones embed nothing):
+# four, each the page's two sections in one call. Then the two questions
+# that reached the model.
+if len(page_embeds) != 4 or len(question_embeds) != 2 or len(embeds) != 6:
+    problems.append(f"{len(page_embeds)} page and {len(question_embeds)} question embeddings (of {len(embeds)}); want 4 and 2")
 if len(answers) != 2 or not all(c.get("stream") for c in answers):
     problems.append(f"the answers were {answers}: want two, both streamed")
 for p in problems:

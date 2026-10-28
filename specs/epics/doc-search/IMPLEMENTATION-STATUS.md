@@ -4,7 +4,10 @@
 |---|---|---|
 | DQ0 — the spec | ✅ | DQ-1 |
 | DQ1 — the doc search on Workers and Supabase | ✅ | DQ-2 |
-| DQ2 — a baseline | ✅ | DQ-3, tagged `baseline-v1` |
+| DQ2 — a baseline | ✅ | DQ-3, tagged `baseline-v1`; DQ-4, tagged `baseline-v2` |
+
+`baseline-v2` (DQ-4): `POST /api/embeddings?refresh=1` needs the
+environment's `REINDEX_TOKEN` as a bearer (departure 16, risk DQ-E).
 
 ## Departures from the upstream template
 
@@ -27,6 +30,7 @@ Everything not listed here is the template as it is at `50d6bb7`.
 | 13 | `supabase/seed.sql` not carried; `supabase/config.toml` dropped | The seed holds ada-002 vectors; the project is Terraform's |
 | 14 | `app/api/health/route.ts` added | The deploy's smoke and the record's probe: reachable, migrated, how much is indexed |
 | 15 | `next.config.js` → `next.config.mjs` (standalone output, the trace root, `images.unoptimized`, the dev platform proxy), `open-next.config.ts` and `wrangler.template.jsonc` added; `@types/unist` pinned at upstream's 2.0.6 | OpenNext's build; upstream's MDX types |
+| 16 | `--refresh` (upstream's, a build flag only its owner could pass) → `?refresh=1` behind `Authorization: Bearer <REINDEX_TOKEN>` (`lib/reindex.ts`): an optional Orun secret, kept out of the build and handed to the Worker as a Worker secret by `tooling/wire/worker-secrets.mjs`; unset, missing or wrong, a 403 that reaches neither the database nor the model, the bearer compared in constant time. The plain POST stays open | Moved into a public Worker, a re-embed of every page would be anybody's to trigger, billed to the owner (DQ-E) |
 
 ## Departures from the reference
 
@@ -40,7 +44,7 @@ Everything not listed here is the template as it is at `50d6bb7`.
 
 ## Verified
 
-- `pnpm typecheck`, `lint`, `test` (tests/web 37, tests/db 11) and `build`
+- `pnpm typecheck`, `lint`, `test` (tests/web 46, tests/db 11) and `build`
   green; the Worker is 1.80 MiB gzipped (Workers Free).
 - Every contract tier, the leak gate and the placement tier pass locally on
   orun v2.89.0. The e2e tier needs a PostgreSQL server with pgvector

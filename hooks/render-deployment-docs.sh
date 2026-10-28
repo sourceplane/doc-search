@@ -159,6 +159,7 @@ for the answers is a Worker secret the owner adds per environment (README,
 | \`SUPABASE_ORG_ID\` | the workspace | the Supabase connection's organization id — a fact, not a credential |
 | \`SUPABASE_PROJECT_REF\`, \`SUPABASE_DB_PASSWORD\`, \`SUPABASE_DB_URL\` | \`${repo}\` on stage and on prod | written by the Supabase root's apply: the project's ref, its database password and its connection URL, read by Hyperdrive and the migrations |
 | \`WIRING_CLOUDFLARE_HYPERDRIVE\` | \`${repo}\` on stage and on prod | written by the Hyperdrive root's apply: the config's id and name, not a credential |
+| \`REINDEX_TOKEN\` (optional) | \`${repo}\` on stage and on prod, if the owner stores it | the bearer \`POST /api/embeddings?refresh=1\` (re-embed every page) needs; each deploy hands it to the Worker as a Worker secret. Unset, refresh is refused (README, "Re-embedding every page") |
 
 Brokered secrets are minted per run, so no long-lived value is at rest. No
 AI vendor key is a workspace secret: OpenAI's key, if the owner adds it, is

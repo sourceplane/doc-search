@@ -92,8 +92,13 @@ So the work splits in two.
   more than zero sections. Every deploy indexes what changed and nothing
   else; a redeploy with the same docs costs one SELECT per page.
 
-The endpoint takes no credential: all it can do is embed the docs the Worker
-was built with (risk DQ-E).
+The plain POST takes no credential: all it can do is embed the docs the
+Worker was built with, and only what changed (risk DQ-E). `?refresh=1`
+re-embeds every page, billed to the owner's Workers AI, so it needs the
+environment's `REINDEX_TOKEN` as a bearer (`lib/reindex.ts`, compared in
+constant time): an optional Orun secret the build never sees and the deploy
+hands to the Worker as a Worker secret. Unset, missing or wrong, refresh is
+a 403 that reaches neither the database nor the model.
 
 ## 5. The models and the search
 

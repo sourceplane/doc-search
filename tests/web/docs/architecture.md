@@ -2,7 +2,7 @@
 
 A test package at `tests/web`. Its lane runs the suite before it builds.
 
-## Suites (7)
+## Suites (8)
 
 - `docs-index.test.ts`
 - `models.test.ts`
@@ -10,4 +10,5 @@ A test package at `tests/web`. Its lane runs the suite before it builds.
 - `site.test.ts`
 - `sync.test.ts`
 - `utils.test.ts`
+- `worker-secrets.test.ts`
 - `wrangler-config.test.ts`
